@@ -913,73 +913,6 @@ def bootstrap(data, B, c, func):
 flat_sensor_derived_step = [item for sublist in temp_sensor_derived_steps for item in sublist]
 result3 = bootstrap(flat_sensor_derived_step, 2000, 0.95, average)
 
- 
-#############################################################################
-# Case Study: 3-1
-#############################################################################
-# get_transition_arrays will give daily transition numbers
-# if that day does not exist, then it returns 0
-def get_transition_in_dates(cleaned_ila,choppedTime):
-    # count how many rooms in this user's house
-    room_num = len(cleaned_ila['changed_sensor_id'].unique().tolist())
-    # print(room_num)
-    transition=[]; day=[]
-    for i in range(len(choppedTime)-1):
-        # get daily motion data
-        choppedila_day  = cleaned_ila[cleaned_ila['local_timestamp'] > choppedTime[i]]
-        choppedila_day  = choppedila_day[choppedila_day['local_timestamp'] < choppedTime[i+1]]
-        if len(choppedila_day)==0:
-            continue
-        # label the transitions and change them to merged transition labels
-        ila_lablled = labels_between_room(choppedila_day)
-        # get choppedila_day dataframe's date
-        that_day_list = choppedila_day.local_timestamp.tolist()
-        that_day = that_day_list[0][0:10:] # trim datetime hours
-        day.append(that_day)
-        
-        if room_num == 5:
-            merge_labelled_ilaList = merge_5_sensors(ila_lablled)
-        if room_num == 6:
-            merge_labelled_ilaList = merge_6_sensors(ila_lablled)
-        if room_num == 7:
-            merge_labelled_ilaList = merge_7_sensors(ila_lablled)
-        if room_num == 8:
-            merge_labelled_ilaList = merge_8_sensors(ila_lablled)
-        if room_num == 9:
-            merge_labelled_ilaList = merge_9_sensors(ila_lablled)
-        if room_num == 10:
-            merge_labelled_ilaList = merge_10_sensors(ila_lablled)
-
-        transition.append(len(merge_labelled_ilaList))
-
-    merged_df = pd.DataFrame({'Day':day,'Transition daily':transition})
-    return merged_df
-
-case = finally_sensor_list[0]
-case_df = get_transition_in_dates(case,choppedTime)
-case_mobility = temp_sensor_derived_steps[0]
-case_df['Steps'] = case_mobility
-#case_df.to_csv(r'D:\DACS\Archive\case_df.csv')
-# now get Y axis and X axis
-dates = [pd.to_datetime(date) for date in case_df['Day']]
-# set the plot
-plt.figure(figsize =(11,9))
-
-plt.subplot(2, 1, 1)
-plt.scatter(dates, case_df['Transition daily'],label='Room Transitions',s =20, c = 'blue')
-plt.grid(True,alpha=0.5)
-plt.legend(loc='upper left')
-plt.ylabel('Transition Counts')
-
-plt.subplot(2, 1, 2)
-plt.scatter(dates, case_df['Steps'],label='Fixed-distance Mobility',s =20, c = 'red')
-plt.grid(True,alpha=0.5)
-plt.legend(loc='upper left')
-plt.ylabel('Mobility in Steps')
-
-#plt.xlim(dates[0],dates[-1])
-
-
 #############################################################################
 # Linear Regression on each of the individual
 #############################################################################
@@ -1054,6 +987,90 @@ spearman_result.to_csv(r'D:\DACS\Individual Participant-correlation coefficient.
 # count rho2 and rho3 moderate corr (0.6<rho<0.8)
 count_moderate3 = sum(map(lambda x : 0.6<x<0.8, rho_list3))
 count_weak3 = sum(map(lambda x : x<0.6, rho_list3))
+#############################################################################
+# Case Study: 3-1
+#############################################################################
+# get_transition_arrays will give daily transition numbers
+# if that day does not exist, then it returns 0
+def get_transition_in_dates(cleaned_ila,choppedTime):
+    # count how many rooms in this user's house
+    room_num = len(cleaned_ila['changed_sensor_id'].unique().tolist())
+    # print(room_num)
+    transition=[]; day=[]
+    for i in range(len(choppedTime)-1):
+        # get daily motion data
+        choppedila_day  = cleaned_ila[cleaned_ila['local_timestamp'] > choppedTime[i]]
+        choppedila_day  = choppedila_day[choppedila_day['local_timestamp'] < choppedTime[i+1]]
+        if len(choppedila_day)==0:
+            continue
+        # label the transitions and change them to merged transition labels
+        ila_lablled = labels_between_room(choppedila_day)
+        # get choppedila_day dataframe's date
+        that_day_list = choppedila_day.local_timestamp.tolist()
+        that_day = that_day_list[0][0:10:] # trim datetime hours
+        day.append(that_day)
+        
+        if room_num == 5:
+            merge_labelled_ilaList = merge_5_sensors(ila_lablled)
+        if room_num == 6:
+            merge_labelled_ilaList = merge_6_sensors(ila_lablled)
+        if room_num == 7:
+            merge_labelled_ilaList = merge_7_sensors(ila_lablled)
+        if room_num == 8:
+            merge_labelled_ilaList = merge_8_sensors(ila_lablled)
+        if room_num == 9:
+            merge_labelled_ilaList = merge_9_sensors(ila_lablled)
+        if room_num == 10:
+            merge_labelled_ilaList = merge_10_sensors(ila_lablled)
+
+        transition.append(len(merge_labelled_ilaList))
+
+    merged_df = pd.DataFrame({'Day':day,'Transition daily':transition})
+    return merged_df
+
+index=9 # 3-1: index =0, 3-121: index=9
+case = finally_sensor_list[index]
+case_df = get_transition_in_dates(case,choppedTime)
+case_mobility = temp_sensor_derived_steps[index]
+case_df['fixed-speed steps'] = case_mobility
+case_df['mobility'] = temp_mobility[index]
+
+#case_df.to_csv(r'D:\DACS\Archive\case_df.csv')
+# now get Y axis and X axis
+dates = [pd.to_datetime(date) for date in case_df['Day']]
+# set the plot
+plt.figure(figsize =(12,9))
+
+plt.subplot(2, 1, 1)
+plt.scatter(dates, case_df['mobility'],label='Fixed-distance Mobility',s =20, c = 'red')
+plt.grid(True,alpha=0.5)
+plt.legend(loc='upper left')
+plt.ylabel('Mobility in Steps')
+plt.ylim(0,)
+plt.xlim(dates[0],dates[-1])
+
+plt.subplot(2, 1, 2)
+plt.scatter(dates, case_df['Transition daily'],label='Room Transitions',s =20, c = 'blue')
+plt.grid(True,alpha=0.5)
+plt.legend(loc='upper left')
+plt.ylabel('Transition Counts')
+plt.ylim(0,)
+plt.xlim(dates[0],dates[-1])
+
+#-----------------------
+# get linear regression plot
+plt.figure(figsize =(10,4))
+plt.xlim(0,850);plt.ylim(0,100)
+# m = slope, b=intercept
+m, b = np.polyfit(case_df['mobility'], case_df['Transition daily'], 1)
+r_squared = r_sq_list2[index]
+plt.plot(case_df['mobility'], m*case_df['mobility'] + b,color="r",label='y={:.2f}x+{:.2f}'.format(m,b))
+plt.legend(loc='upper left')
+plt.plot(case_df['mobility'], case_df['Transition daily'], '+')
+plt.grid(True,alpha=0.5)
+
+plt.xlabel('Transition Counts')
+plt.ylabel('Mobility in Steps')
    
 #############################################################################
 # Correlation Comparision
