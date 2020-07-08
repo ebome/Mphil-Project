@@ -139,19 +139,76 @@ parameter_list = ['sleep_duration','sleep_efficiency','rem_sleep_duration','ligh
                   'deep_sleep_duration','sleep_onset_duration','sleep_score','awakenings',
                   'awake_duration','bed_exit_count','bed_exit_duration']
 
-
+the_parameter =parameter_list[1] 
 X = whole_user[['time','intervention','time_after_intervention']] # time after interruption
 X = sm.add_constant(X)
-Y = whole_user[parameter_list[0]] # DEPENDENT VARIABLE
+Y = whole_user[the_parameter] # DEPENDENT VARIABLE
 
 model_time = sm.OLS(Y,X)
 results_time = model_time.fit()
 results_time.summary()
-
-
 #---------------------------------------
 # test the data for autocorrelation
-pd.plotting.autocorrelation_plot(cleaned_this_user[parameter_list[0]])
+pd.plotting.autocorrelation_plot(cleaned_this_user[the_parameter])
+
+###################################################
+# ITS analysis visualization
+###################################################
+cleaned_truncate_dates = cleaned_this_user[cleaned_this_user['start_date'] >= trucate_date ]
+# use cleaned_truncate_dates dataframe to have two lines parameters
+cleaned_truncate_dates_baseline = cleaned_truncate_dates[cleaned_truncate_dates['start_date'] < covid_time]
+cleaned_truncate_dates_covid = cleaned_truncate_dates[cleaned_truncate_dates['start_date'] >= covid_time]
+# m = slope, b=intercept
+x_axis_baseline = list(range(len(cleaned_truncate_dates_baseline[the_parameter])))
+m_baseline, b_baseline = np.polyfit(x_axis_baseline, cleaned_truncate_dates_baseline[the_parameter], 1)
+x_axis_covid = list(range(len(cleaned_truncate_dates_covid[the_parameter])))
+m_covid, b_covid = np.polyfit(x_axis_covid, cleaned_truncate_dates_covid[the_parameter], 1)
+
+#---------------------------------------
+# after getting m and b for baseline and covid, we need to change the cleaned_truncate_dates to a series
+dates_in_time_format = cleaned_truncate_dates['start_date'].dt.strftime('%Y-%m-%d') # in datetime format
+dates_in_time_format = dates_in_time_format.values.tolist()
+cleaned_truncate_dates['start_date_in_str']=dates_in_time_format
+cleaned_truncate_dates = cleaned_truncate_dates.set_index('start_date_in_str')
+cleaned_truncate_dates.index = pd.DatetimeIndex(cleaned_truncate_dates.index)
+starting_of_date = cleaned_truncate_dates_baseline['start_date'].iloc[0].strftime('%Y-%m-%d')
+ending_of_date = cleaned_truncate_dates_covid['start_date'].iloc[-1].strftime('%Y-%m-%d')
+idx = pd.date_range(starting_of_date, ending_of_date)
+cleaned_truncate_dates = cleaned_truncate_dates.reindex(idx, fill_value='nan')
+#---------------------------------------
+# now recut baseline and covid that containing the missing days
+cleaned_truncate_dates_baseline_with_nan = cleaned_truncate_dates[cleaned_truncate_dates.index < covid_time]
+cleaned_truncate_dates_covid_with_nan = cleaned_truncate_dates[cleaned_truncate_dates.index >= covid_time]
+
+x_axis_baseline = list(range(len(cleaned_truncate_dates_baseline_with_nan)))
+# to get x_axis_covid, just re-change the ['time'] in cleaned_truncate_dates
+cleaned_truncate_dates['time'] = list(range(1,len(cleaned_truncate_dates)+1))
+cleaned_truncate_dates['intervention'] = 0
+cleaned_truncate_dates.loc[cleaned_truncate_dates.index >= covid_time, 'intervention'] = 1
+cleaned_truncate_dates['time_after_intervention'] = 0
+cleaned_truncate_dates.loc[cleaned_truncate_dates.index >= covid_time, 'time_after_intervention'] = 1
+length_of_intervention_days = len(cleaned_truncate_dates[cleaned_truncate_dates['time_after_intervention'] ==1])
+cleaned_truncate_dates.loc[cleaned_truncate_dates.index >= covid_time, 'time_after_intervention'] = list(range(1,length_of_intervention_days+1))
+# now use ['time'] in cleaned_truncate_dates as x_axis_covid
+x_axis_covid = cleaned_truncate_dates[cleaned_truncate_dates.index>= covid_time]['time'].values.tolist()
+
+#---------------------------------------
+# from series cleaned_truncate_dates_one_parameter, get the dates 
+y = cleaned_truncate_dates[the_parameter]
+dates = list(range(len(y)))
+x_labels = [date.strftime('%Y-%m-%d') for date in cleaned_truncate_dates.index]
+
+# plot the whole
+plt.figure(figsize =(25,5))
+plt.plot(dates, y, c = 'blue')
+plt.grid(True,alpha=0.5)
+plt.ylabel('sleep efficiency (%)')
+plt.xticks(dates, x_labels, rotation='vertical')
+plt.plot(x_axis_baseline, m_baseline*np.asarray(x_axis_baseline) + b_baseline,'--',
+         color="r",label='y1={:.4f}x+{:.4f}'.format(m_baseline,b_baseline))
+plt.plot(x_axis_covid, m_covid*np.asarray(x_axis_covid) + b_covid,'--',
+         color="g",label='y2={:.4f}x+{:.4f}'.format(m_covid,b_covid))
+plt.xlabel('Sleep start recording date')
 
 ###################################################
 # Merge the selected 10 users data
