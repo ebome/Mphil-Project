@@ -196,19 +196,22 @@ x_axis_covid = cleaned_truncate_dates[cleaned_truncate_dates.index>= covid_time]
 # from series cleaned_truncate_dates_one_parameter, get the dates 
 y = cleaned_truncate_dates[the_parameter]
 dates = list(range(len(y)))
-x_labels = [date.strftime('%Y-%m-%d') for date in cleaned_truncate_dates.index]
+x_labels_all = [date.strftime('%Y-%m-%d') for date in cleaned_truncate_dates.index]
+x_labels = x_labels_all[0 : -1 : 5]
 
 # plot the whole
 plt.figure(figsize =(25,5))
 plt.plot(dates, y, c = 'blue')
+plt.rc('ytick',labelsize=20)
 plt.grid(True,alpha=0.5)
-plt.ylabel('sleep efficiency (%)')
-plt.xticks(dates, x_labels, rotation='vertical')
+plt.ylabel('Sleep Duration (seconds)', fontsize=30)
+plt.xticks(dates, x_labels, rotation='vertical', fontsize=20)
+plt.locator_params(axis='x', nbins=25)
 plt.plot(x_axis_baseline, m_baseline*np.asarray(x_axis_baseline) + b_baseline,'--',
          color="r",label='y1={:.4f}x+{:.4f}'.format(m_baseline,b_baseline))
 plt.plot(x_axis_covid, m_covid*np.asarray(x_axis_covid) + b_covid,'--',
          color="g",label='y2={:.4f}x+{:.4f}'.format(m_covid,b_covid))
-plt.xlabel('Sleep start recording date')
+plt.xlabel('Date', fontsize=40)
 
 ###################################################
 # Merge the selected 10 users data
