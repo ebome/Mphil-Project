@@ -1069,8 +1069,8 @@ plt.legend(loc='upper left')
 plt.plot(case_df['mobility'], case_df['Transition daily'], '+')
 plt.grid(True,alpha=0.5)
 
-plt.xlabel('Transition Counts')
-plt.ylabel('Mobility in Steps')
+plt.xlabel('Mobility in Steps')
+plt.ylabel('Transition Counts')
    
 #############################################################################
 # Correlation Comparision
