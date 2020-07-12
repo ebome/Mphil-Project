@@ -402,7 +402,8 @@ def ttest_among_base_covid(user_base_trimed, user_covid_trimed):
     ttest,pval = stats.ttest_rel(flatten_list_base,flatten_list_covid)
     return ttest,pval
 
-test_list=[];pval_list=[]
+test_list=[];pval_list=[];mean_list_base=[];std_list_base=[]
+mean_list_covid=[];std_list_covid=[]
 parameter_list = ['sleep_duration','sleep_efficiency','rem_sleep_duration','light_sleep_duration',
                   'deep_sleep_duration','sleep_onset_duration','sleep_score','awakenings',
                   'awake_duration','bed_exit_count','bed_exit_duration']
@@ -410,8 +411,18 @@ for parameter_str in parameter_list:
     user_base_trimed_parameter, user_covid_trimed_parameter = get_base_covid_same_length(parameter_str,user_selected_baseline,user_selected_covid19)
     ttest, pval = ttest_among_base_covid(user_base_trimed_parameter, user_covid_trimed_parameter)
     test_list.append(ttest);pval_list.append(pval)
+    # combine all users' this parameter value and get the mean std
+    all_user_base_trimed_parameter = np.asarray([item for sublist in user_base_trimed_parameter for item in sublist])
+    all_user_covid_trimed_parameter = np.asarray([item for sublist in user_covid_trimed_parameter for item in sublist])
+    all_user_base_mean = np.mean(all_user_base_trimed_parameter);all_user_base_std = np.std(all_user_base_trimed_parameter)
+    all_user_covid_mean = np.mean(all_user_covid_trimed_parameter);all_user_covid_std = np.std(all_user_covid_trimed_parameter)
+    mean_list_base.append(all_user_base_mean);std_list_base.append(all_user_base_std)
+    mean_list_covid.append(all_user_covid_mean);std_list_covid.append(all_user_covid_std)
 
-all_user_ttest = pd.DataFrame({'parameter':parameter_list, 'paired_t_test':test_list,'p_value':pval_list })
+
+all_user_ttest = pd.DataFrame({'parameter':parameter_list,'baseline mean':mean_list_base,
+                               'baseline std':std_list_base, 'covid mean':mean_list_covid,
+                               'covid std':std_list_covid, 'paired_t_test':test_list,'p_value':pval_list })
 
 
 #------------------------------------
@@ -443,14 +454,23 @@ for each_user in list_each_user_selected:
     baseline_duration = get_masked_dataframe(end_date_b, end_date_apr, each_user)
     user_no_ci_covid19.append(baseline_duration)
 
-test_list=[];pval_list=[]
+test_list=[];pval_list=[];mean_list_base=[];std_list_base=[]
+mean_list_covid=[];std_list_covid=[]
 for parameter_str in parameter_list:
     user_base_trimed_parameter, user_covid_trimed_parameter = get_base_covid_same_length(parameter_str,user_no_ci_baseline,user_no_ci_covid19)
     ttest, pval = ttest_among_base_covid(user_base_trimed_parameter, user_covid_trimed_parameter)
     test_list.append(ttest);pval_list.append(pval)
+    # combine all users' this parameter value and get the mean std
+    all_user_base_trimed_parameter = np.asarray([item for sublist in user_base_trimed_parameter for item in sublist])
+    all_user_covid_trimed_parameter = np.asarray([item for sublist in user_covid_trimed_parameter for item in sublist])
+    all_user_base_mean = np.mean(all_user_base_trimed_parameter);all_user_base_std = np.std(all_user_base_trimed_parameter)
+    all_user_covid_mean = np.mean(all_user_covid_trimed_parameter);all_user_covid_std = np.std(all_user_covid_trimed_parameter)
+    mean_list_base.append(all_user_base_mean);std_list_base.append(all_user_base_std)
+    mean_list_covid.append(all_user_covid_mean);std_list_covid.append(all_user_covid_std)
 
-no_ci_user_ttest = pd.DataFrame({'parameter':parameter_list, 'paired_t_test':test_list,'p_value':pval_list })
-
+no_ci_user_ttest = pd.DataFrame({'parameter':parameter_list,'baseline mean':mean_list_base,
+                               'baseline std':std_list_base, 'covid mean':mean_list_covid,
+                               'covid std':std_list_covid, 'paired_t_test':test_list,'p_value':pval_list })
 
 ###################################################
 # plot the distribution of users: histogram
