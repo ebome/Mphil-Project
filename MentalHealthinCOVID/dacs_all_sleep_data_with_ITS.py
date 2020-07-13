@@ -158,11 +158,34 @@ cleaned_truncate_dates = cleaned_this_user[cleaned_this_user['start_date'] >= tr
 # use cleaned_truncate_dates dataframe to have two lines parameters
 cleaned_truncate_dates_baseline = cleaned_truncate_dates[cleaned_truncate_dates['start_date'] < covid_time]
 cleaned_truncate_dates_covid = cleaned_truncate_dates[cleaned_truncate_dates['start_date'] >= covid_time]
+
+#---------------------------------------
 # m = slope, b=intercept
-x_axis_baseline = list(range(len(cleaned_truncate_dates_baseline[the_parameter])))
-m_baseline, b_baseline = np.polyfit(x_axis_baseline, cleaned_truncate_dates_baseline[the_parameter], 1)
-x_axis_covid = list(range(len(cleaned_truncate_dates_covid[the_parameter])))
-m_covid, b_covid = np.polyfit(x_axis_covid, cleaned_truncate_dates_covid[the_parameter], 1)
+# get slop for all the desired parameters
+def get_slope_and_intercept(cleaned_truncate_dates,the_parameter):
+    x_axis = list(range(len(cleaned_truncate_dates[the_parameter])))
+    m, b = np.polyfit(x_axis, cleaned_truncate_dates[the_parameter], 1)
+    return m,b
+
+
+m_b_sleep_dura,b_b_sleep_dura = get_slope_and_intercept(cleaned_truncate_dates_baseline,parameter_list[0])
+m_c_sleep_dura,b_c_sleep_dura = get_slope_and_intercept(cleaned_truncate_dates_covid,parameter_list[0])
+m_b_awake_dura,b_b_awake_dura = get_slope_and_intercept(cleaned_truncate_dates_baseline,parameter_list[8])
+m_c_awake_dura,b_c_awake_dura = get_slope_and_intercept(cleaned_truncate_dates_covid,parameter_list[8])
+m_b_sleep_effi,b_b_sleep_effi = get_slope_and_intercept(cleaned_truncate_dates_baseline,parameter_list[1])
+m_c_sleep_effi,b_c_sleep_effi = get_slope_and_intercept(cleaned_truncate_dates_covid,parameter_list[1])
+#---------------------------------------
+# get average for all the desired parameters
+def get_average(cleaned_truncate_dates,the_parameter):
+    avg = cleaned_truncate_dates[the_parameter].mean()
+    return avg
+
+avg_baseline_sleep_dura = get_average(cleaned_truncate_dates_baseline,parameter_list[0])
+avg_covid_sleep_dura = get_average(cleaned_truncate_dates_covid,parameter_list[0])
+avg_baseline_awake_dura = get_average(cleaned_truncate_dates_baseline,parameter_list[8])
+avg_covid_awake_dura = get_average(cleaned_truncate_dates_covid,parameter_list[8])
+avg_covid_sleep_effi = get_average(cleaned_truncate_dates_covid,parameter_list[1])
+avg_baseline_sleep_effi = get_average(cleaned_truncate_dates_baseline,parameter_list[1])
 
 #---------------------------------------
 # after getting m and b for baseline and covid, we need to change the cleaned_truncate_dates to a series
@@ -194,23 +217,56 @@ x_axis_covid = cleaned_truncate_dates[cleaned_truncate_dates.index>= covid_time]
 
 #---------------------------------------
 # from series cleaned_truncate_dates_one_parameter, get the dates 
-y = cleaned_truncate_dates[the_parameter]
-dates = list(range(len(y)))
+y_truncate_dates_sleep_dura = cleaned_truncate_dates[parameter_list[0]]
+y_truncate_dates_awake_dura = cleaned_truncate_dates[parameter_list[8]]
+y_truncate_dates_sleep_effi = cleaned_truncate_dates[parameter_list[1]]
+
+
+dates = list(range(len(y_truncate_dates_sleep_dura)))
 x_labels_all = [date.strftime('%Y-%m-%d') for date in cleaned_truncate_dates.index]
 x_labels = x_labels_all[0 : -1 : 5]
 
+
 # plot the whole
-plt.figure(figsize =(25,5))
-plt.plot(dates, y, c = 'blue')
-plt.rc('ytick',labelsize=20)
+plt.figure(figsize =(25,25))
+# sleep duration as first image
+plt.subplot(3, 1, 1)
+plt.plot(dates, y_truncate_dates_sleep_dura, c = 'blue')
+plt.rc('ytick')
 plt.grid(True,alpha=0.5)
-plt.ylabel('Sleep Duration (seconds)', fontsize=30)
-plt.xticks(dates, x_labels, rotation='vertical', fontsize=20)
+plt.ylabel('Sleep Duration TST (minutes)', fontsize=17)
+plt.xticks(dates, x_labels, rotation='vertical')
 plt.locator_params(axis='x', nbins=25)
-plt.plot(x_axis_baseline, m_baseline*np.asarray(x_axis_baseline) + b_baseline,'--',
-         color="r",label='y1={:.4f}x+{:.4f}'.format(m_baseline,b_baseline))
-plt.plot(x_axis_covid, m_covid*np.asarray(x_axis_covid) + b_covid,'--',
-         color="g",label='y2={:.4f}x+{:.4f}'.format(m_covid,b_covid))
+plt.plot(x_axis_baseline, 0*np.asarray(x_axis_baseline) + avg_baseline_sleep_dura,'--',
+         color="r")
+plt.plot(x_axis_covid, 0*np.asarray(x_axis_covid) + avg_covid_sleep_dura,'--',
+         color="r")
+
+# awake duration as 2nd image
+plt.subplot(3, 1, 2)
+plt.plot(dates, y_truncate_dates_awake_dura, c = 'blue')
+plt.rc('ytick')
+plt.grid(True,alpha=0.5)
+plt.ylabel('Awake Duration WASO (minutes)', fontsize=17)
+plt.xticks(dates, x_labels, rotation='vertical')
+plt.locator_params(axis='x', nbins=25)
+plt.plot(x_axis_baseline, 0*np.asarray(x_axis_baseline) + avg_baseline_awake_dura,'--',
+         color="r")
+plt.plot(x_axis_covid, 0*np.asarray(x_axis_covid) + avg_covid_awake_dura,'--',
+         color="r")
+
+# sleep efficiency as 3rd image
+plt.subplot(3, 1, 3)
+plt.plot(dates, y_truncate_dates_sleep_effi, c = 'blue')
+plt.rc('ytick')
+plt.grid(True,alpha=0.5)
+plt.ylabel('Sleep Efficiency (%)', fontsize=17)
+plt.xticks(dates, x_labels, rotation='vertical')
+plt.locator_params(axis='x', nbins=25)
+plt.plot(x_axis_baseline, 0*np.asarray(x_axis_baseline) + avg_baseline_sleep_effi,'--',
+         color="r")
+plt.plot(x_axis_covid, 0*np.asarray(x_axis_covid) + avg_covid_sleep_effi,'--',
+         color="r")
 plt.xlabel('Date', fontsize=40)
 
 ###################################################
