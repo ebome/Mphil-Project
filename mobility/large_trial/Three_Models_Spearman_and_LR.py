@@ -40,9 +40,16 @@ unit_not_in_mobility = [elem for elem in people_list if elem not in people_list_
 # The ~ is a not operator 
 new_dacs_sensor = all_dacs_sensor[~all_dacs_sensor.PID.isin(unit_not_in_mobility)]
 # drop the multi-residential houses from all_dacs_mobility,3-157 has 2 days data, drop too
-unit_to_remove_from_mobility = ['3-102','3-112','3-159','3-175','3-131','3-164','3-157','3-42']
-new_dacs_mobility = all_dacs_mobility[~all_dacs_mobility.unit.isin(unit_to_remove_from_mobility)]
+unit_to_remove = ['3-102','3-112','3-159','3-175','3-131','3-164','3-157','3-42',
+                                
+                                '3-7','3-10','3-15','3-16','3-20','3-35','3-38','3-51','3-55',
+                                '3-57','3-59','3-62','3-66','3-67','3-80','3-84','3-91','3-92',
+                                '3-93','3-94','3-105','3-114','3-122','3-125','3-126','3-130',
+                                '3-134','3-146','3-150','3-161','3-166']
 
+
+new_dacs_mobility = all_dacs_mobility[~all_dacs_mobility.unit.isin(unit_to_remove)]
+new_dacs_sensor = new_dacs_sensor[~new_dacs_sensor.PID.isin(unit_to_remove)]
 # split the whole data into different people/unit
 mobility_grouped_list = list(new_dacs_mobility.groupby(['unit']))
 sensor_grouped_list = list(new_dacs_sensor.groupby(['PID']))
