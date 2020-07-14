@@ -648,12 +648,12 @@ for elt in datelist2:
 # Keep the sensor readings from sensor_list based on the chopped time
 start_time2 = choppedTime2[0]
 end_time2 = choppedTime2[-1]
-the_XXX_user = reformed_mobility_list[61]
+the_XXX_user = reformed_mobility_list[36]
 # change the date format in 'date'
 the_XXX_user['new_date'] = pd.to_datetime(the_XXX_user["date"], format = '%d/%m/%Y')
 # chop the user's mobility and put back to reformed_mobility_list
 the_XXXAAA_user = the_XXX_user[(the_XXX_user['new_date'] >= start_time2)& (the_XXX_user['new_date'] < end_time2)]
-reformed_mobility_list[61] = the_XXXAAA_user
+reformed_mobility_list[36] = the_XXXAAA_user
 
 '''
  User 3-65 has mobility from 07.29-10.27 but sensor reading from 10.2-10.30. 
@@ -671,12 +671,12 @@ for elt in datelist3:
 # Keep the sensor readings from sensor_list based on the chopped time
 start_time3 = choppedTime3[0]
 end_time3 = choppedTime3[-1]
-the_XXX_user = reformed_mobility_list[57]
+the_XXX_user = reformed_mobility_list[35]
 # change the date format in 'date'
 the_XXX_user['new_date'] = pd.to_datetime(the_XXX_user["date"], format = '%d/%m/%Y')
 # chop the user's mobility and put back to reformed_mobility_list
 the_XXXAAA_user = the_XXX_user[(the_XXX_user['new_date'] >= start_time3) & (the_XXX_user['new_date'] < end_time3) ]
-reformed_mobility_list[57] = the_XXXAAA_user
+reformed_mobility_list[35] = the_XXXAAA_user
 
 
 '''
