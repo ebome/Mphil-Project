@@ -55,582 +55,14 @@ mobility_grouped_list = list(new_dacs_mobility.groupby(['unit']))
 sensor_grouped_list = list(new_dacs_sensor.groupby(['PID']))
 
 #############################################################################
-# Pre-selecting of useful time and data
+# Get mobility (fixed-distance step, distance travelled): ground truth
 #############################################################################
-# Delete the '0' signal in sensors, change the dataframe
-def reform_df(MotionData_ila):
-
-    MotionData_ila = MotionData_ila[MotionData_ila['sensor_value'] == 1]
-    room_list = MotionData_ila['sensor_name'].unique().tolist()
-    # the original sensor id are too complicated, change them to 0,1,2,...
-    sensor_id = list(range(len(room_list)))
-
-    allRooms = MotionData_ila['sensor_name'].values.tolist()
-    temp=[]
-    for i in range(len(allRooms)):
-        for j in range(len(room_list)):
-            if allRooms[i]==room_list[j]:
-                temp.append(sensor_id[j])
-            
-    MotionData_ila['new_sensor_id'] = temp
-    
-    # up to this step, we have get the dataframw, but don't forget to convert to time object
-    datetime_list = []
-    time_list = MotionData_ila["local_timestamp"].values.tolist()
-    for elt in time_list:
-        aa = dt.datetime.strptime(elt, '%Y-%m-%d %H:%M:%S')
-        datetime_list.append(aa)
-    MotionData_ila['extact_time'] = time_list         
-    
-    # Sort the datetime 
-    aaa = MotionData_ila.sort_values(by="extact_time") 
-    return aaa
-
-reformed_sensor_list=[]
-for each_PID in sensor_grouped_list:
-    PID_motiondata = each_PID[1]
-    reformed_each_df = reform_df(PID_motiondata)
-    reformed_sensor_list.append(reformed_each_df)
-
 # reform the mobility since cleaned_sensor_list and mobility_list have same PID units
 reformed_mobility_list=[]    
 for each_unit in mobility_grouped_list:
     unit_motiondata = each_unit[1]
+    #unit_motiondata = unit_motiondata.replace(0,1) # 1 step is not huge but avoid move-out of 0 later
     reformed_mobility_list.append(unit_motiondata)
-    
-    
-#----------------------------------------------------------------------------- 
-# For each unit in reformed_mobility_list and reformed_sensor_list, remove the 
-# dates that not shown in reformed_mobility_list
-cleaned_sensor_list = []
-
-for i in range(len(reformed_sensor_list)):
-    each_PID = reformed_sensor_list[i]
-    each_unit = reformed_mobility_list[i]
-    # for the two dataframe, check the time
-    mobility_date = each_unit.date.tolist()
-    sensor_date = each_PID.local_timestamp.tolist()
-    #  mobility has time format YY-MM-DD but sensor also has hours
-    mobility_date = [dt.datetime.strptime(date, '%d/%m/%Y').date() for date in mobility_date] 
-    sensor_date = [dt.datetime.strptime(date, '%Y-%m-%d %H:%M:%S') for date in sensor_date]
-    # sensor hours can be removed
-    sensor_date_truncated = [each_day.date() for each_day in sensor_date] 
-    # now the days that in sensor reading but not in mobilty are found
-    date_not_in_mobility = [elem for elem in sensor_date_truncated if elem not in mobility_date]
-    # remove repetitive items in date_not_in_mobility
-    date_notin_mobility = list(set(date_not_in_mobility))
-    date_notin_mobility = sorted(date_notin_mobility)
-    # transfer the list back to str format
-    aaa = [each_date.__str__() for each_date in date_notin_mobility] 
-
-    # after the for loop, each_PID will have same dates as each_unit in mobility
-    for a in aaa:
-        # find the sensor readings that should be deleted
-        deleted = each_PID[each_PID['extact_time'].str.contains(a)]
-        # remove these units from sensor reading dataframe
-        each_PID = pd.concat([each_PID, deleted]).drop_duplicates(keep=False)
-
-    cleaned_sensor_list.append(each_PID)
-
-#############################################################################
-# Get the lists of transition times
-#############################################################################
-# Remove 'repetitive sensor'
-def remove_dup_df(motion_data):
-    # drop the duplicates in sensor_id
-    drop_dup_df = motion_data.loc[(motion_data['sensor_id'].shift() != motion_data['sensor_id'])]
-    return drop_dup_df
-#----------------------------------------------------------------------------- 
-sensor_list=[]
-for each_PID in cleaned_sensor_list:
-    cleaned_each_df = remove_dup_df(each_PID)
-    sensor_list.append(cleaned_each_df)
-
-'''
-time span for mobility: 2019/04/26 - 2019/10/29(included) (maximal 172 days in mobility_list). 
-Just remove the dates that are not in this range for sensor_list
-'''    
-# Chopped datetime
-base = dt.datetime.strptime('2019-04-26 00:00:00', '%Y-%m-%d %H:%M:%S')
-datelist = pd.date_range(base, periods=188).tolist()
-choppedTime=[]
-for elt in datelist:
-    strg = f'{elt:%Y-%m-%d %H:%M:%S}'
-    choppedTime.append(strg)
-
-# Keep the sensor readings from sensor_list based on the chopped time
-start_time = choppedTime[0]
-end_time = choppedTime[-1]
-final_sensor_list=[]
-for each_user_sensor_reading in sensor_list:
-    each_user_sensor_reading = each_user_sensor_reading[(each_user_sensor_reading['local_timestamp'] > start_time) & (each_user_sensor_reading['local_timestamp'] < end_time) ]
-    final_sensor_list.append(each_user_sensor_reading)
-
-#-----------------------------------------------------------------------------  
-# get daily room transition
-
-# find maximal and minimal snesors
-max_rooms=0
-min_rooms=len(final_sensor_list[0]['new_sensor_id'].unique().tolist())
-for each_user in final_sensor_list:
-    test_user_room_list = each_user['new_sensor_id'].unique().tolist()
-    if len(test_user_room_list) >= max_rooms:
-        max_rooms = len(test_user_room_list)
-    if len(test_user_room_list) < min_rooms:
-        min_rooms = len(test_user_room_list)
-# now we know max_room=10, min_room=5
-
-'''
-If we check each PID dataframe, we will realize that some sensors are removed
-For example, originally there are 8 sensors (0-7), now after removing there are 
-5 sensors(0,2,4,6,7), so we would better change the sensor names to 0-4
-'''    
-def change_sensor_name(MotionData_ila):
-    room_list = MotionData_ila['sensor_name'].unique().tolist()
-    # the original sensor id are too complicated, change them to 0,1,2,...
-    sensor_id = list(range(len(room_list)))
-    allRooms = MotionData_ila['sensor_name'].values.tolist()
-    temp=[]
-    for i in range(len(allRooms)):
-        for j in range(len(room_list)):
-            if allRooms[i]==room_list[j]:
-                temp.append(sensor_id[j])
-            
-    MotionData_ila['changed_sensor_id'] = temp
-    return MotionData_ila
-
-
-finally_sensor_list=[]
-for test_user in final_sensor_list:
-    user_sensor_reading = change_sensor_name(test_user)
-    finally_sensor_list.append(user_sensor_reading)
-#-----------------------------------------------------------------------------  
-# merge '3 to 4' and '4 to 3'
-def merge_5_sensors(ila_lablled):
-    label = ila_lablled['label'].values.tolist()
-    temp=[]
-    for i in range(0,len(label)):
-        if label[i] == '0 to 1' or label[i] == '1 to 0':
-            temp.append('0 to 1')
-        if label[i] == '0 to 2' or label[i] == '2 to 0':
-            temp.append('0 to 2')
-        if label[i] == '0 to 3' or label[i] == '3 to 0':
-            temp.append('0 to 3')
-        if label[i] == '0 to 4' or label[i] == '4 to 0':
-            temp.append('0 to 4')
-        if label[i] == '1 to 2' or label[i] == '2 to 1':
-            temp.append('1 to 2')
-        if label[i] == '1 to 3' or label[i] == '3 to 1':
-            temp.append('1 to 3')
-        if label[i] == '1 to 4' or label[i] == '4 to 1':
-            temp.append('1 to 4')
-        if label[i] == '2 to 3' or label[i] == '3 to 2':
-            temp.append('2 to 3')
-        if label[i] == '2 to 4' or label[i] == '4 to 2':
-            temp.append('2 to 4')
-        if label[i] == '3 to 4' or label[i] == '4 to 3':
-            temp.append('3 to 4')
-    return temp
-
-
-def merge_6_sensors(ila_lablled):
-    label = ila_lablled['label'].values.tolist()
-    temp=[]
-    for i in range(0,len(label)):
-        if label[i] == '0 to 1' or label[i] == '1 to 0':
-            temp.append('0 to 1')
-        if label[i] == '0 to 2' or label[i] == '2 to 0':
-            temp.append('0 to 2')
-        if label[i] == '0 to 3' or label[i] == '3 to 0':
-            temp.append('0 to 3')
-        if label[i] == '0 to 4' or label[i] == '4 to 0':
-            temp.append('0 to 4')
-        if label[i] == '0 to 5' or label[i] == '5 to 0':
-            temp.append('0 to 5')
-        if label[i] == '1 to 2' or label[i] == '2 to 1':
-            temp.append('1 to 2')
-        if label[i] == '1 to 3' or label[i] == '3 to 1':
-            temp.append('1 to 3')
-        if label[i] == '1 to 4' or label[i] == '4 to 1':
-            temp.append('1 to 4')
-        if label[i] == '1 to 5' or label[i] == '5 to 1':
-            temp.append('1 to 5')
-        if label[i] == '2 to 3' or label[i] == '3 to 2':
-            temp.append('2 to 3')
-        if label[i] == '2 to 4' or label[i] == '4 to 2':
-            temp.append('2 to 4')
-        if label[i] == '2 to 5' or label[i] == '5 to 2':
-            temp.append('2 to 5')
-        if label[i] == '3 to 4' or label[i] == '4 to 3':
-            temp.append('3 to 4')
-        if label[i] == '3 to 5' or label[i] == '5 to 3':
-            temp.append('3 to 5')
-        if label[i] == '4 to 5' or label[i] == '5 to 4':
-            temp.append('4 to 5')
-    return temp
-
-
-def merge_7_sensors(ila_lablled):
-    label = ila_lablled['label'].values.tolist()
-    temp=[]
-    for i in range(0,len(label)):
-        if label[i] == '0 to 1' or label[i] == '1 to 0':
-            temp.append('0 to 1')
-        if label[i] == '0 to 2' or label[i] == '2 to 0':
-            temp.append('0 to 2')
-        if label[i] == '0 to 3' or label[i] == '3 to 0':
-            temp.append('0 to 3')
-        if label[i] == '0 to 4' or label[i] == '4 to 0':
-            temp.append('0 to 4')
-        if label[i] == '0 to 5' or label[i] == '5 to 0':
-            temp.append('0 to 5')
-        if label[i] == '0 to 6' or label[i] == '6 to 0':
-            temp.append('0 to 6')
-            
-        if label[i] == '1 to 2' or label[i] == '2 to 1':
-            temp.append('1 to 2')
-        if label[i] == '1 to 3' or label[i] == '3 to 1':
-            temp.append('1 to 3')
-        if label[i] == '1 to 4' or label[i] == '4 to 1':
-            temp.append('1 to 4')
-        if label[i] == '1 to 5' or label[i] == '5 to 1':
-            temp.append('1 to 5')              
-        if label[i] == '1 to 6' or label[i] == '6 to 1':
-            temp.append('1 to 6')
-
-        if label[i] == '2 to 3' or label[i] == '3 to 2':
-            temp.append('2 to 3')
-        if label[i] == '2 to 4' or label[i] == '4 to 2':
-            temp.append('2 to 4')
-        if label[i] == '2 to 5' or label[i] == '5 to 2':
-            temp.append('2 to 5')           
-        if label[i] == '2 to 6' or label[i] == '6 to 2':
-            temp.append('2 to 6')            
-           
-        if label[i] == '3 to 4' or label[i] == '4 to 3':
-            temp.append('3 to 4')
-        if label[i] == '3 to 5' or label[i] == '5 to 3':
-            temp.append('3 to 5')
-        if label[i] == '3 to 6' or label[i] == '6 to 3':
-            temp.append('3 to 6')           
-            
-        if label[i] == '4 to 5' or label[i] == '5 to 4':
-            temp.append('4 to 5')
-        if label[i] == '4 to 6' or label[i] == '6 to 4':
-            temp.append('4 to 6')
-
-        if label[i] == '5 to 6' or label[i] == '6 to 5':
-            temp.append('5 to 6')
-                
-    return temp
-
-
-def merge_8_sensors(ila_lablled):
-    label = ila_lablled['label'].values.tolist()
-    temp=[]
-    for i in range(0,len(label)):
-        if label[i] == '0 to 1' or label[i] == '1 to 0':
-            temp.append('0 to 1')
-        if label[i] == '0 to 2' or label[i] == '2 to 0':
-            temp.append('0 to 2')
-        if label[i] == '0 to 3' or label[i] == '3 to 0':
-            temp.append('0 to 3')
-        if label[i] == '0 to 4' or label[i] == '4 to 0':
-            temp.append('0 to 4')
-        if label[i] == '0 to 5' or label[i] == '5 to 0':
-            temp.append('0 to 5')           
-        if label[i] == '0 to 6' or label[i] == '6 to 0':
-            temp.append('0 to 6')
-        if label[i] == '0 to 7' or label[i] == '7 to 0':
-            temp.append('0 to 7')
-            
-        if label[i] == '1 to 2' or label[i] == '2 to 1':
-            temp.append('1 to 2')
-        if label[i] == '1 to 3' or label[i] == '3 to 1':
-            temp.append('1 to 3')
-        if label[i] == '1 to 4' or label[i] == '4 to 1':
-            temp.append('1 to 4')
-        if label[i] == '1 to 5' or label[i] == '5 to 1':
-            temp.append('1 to 5')              
-        if label[i] == '1 to 6' or label[i] == '6 to 1':
-            temp.append('1 to 6')
-        if label[i] == '1 to 7' or label[i] == '7 to 1':
-            temp.append('1 to 7')
-
-        if label[i] == '2 to 3' or label[i] == '3 to 2':
-            temp.append('2 to 3')
-        if label[i] == '2 to 4' or label[i] == '4 to 2':
-            temp.append('2 to 4')
-        if label[i] == '2 to 5' or label[i] == '5 to 2':
-            temp.append('2 to 5')           
-        if label[i] == '2 to 6' or label[i] == '6 to 2':
-            temp.append('2 to 6')
-        if label[i] == '2 to 7' or label[i] == '7 to 2':
-            temp.append('2 to 7')
-           
-        if label[i] == '3 to 4' or label[i] == '4 to 3':
-            temp.append('3 to 4')
-        if label[i] == '3 to 5' or label[i] == '5 to 3':
-            temp.append('3 to 5')
-        if label[i] == '3 to 6' or label[i] == '6 to 3':
-            temp.append('3 to 6')
-        if label[i] == '3 to 7' or label[i] == '7 to 3':
-            temp.append('3 to 7')            
-            
-        if label[i] == '4 to 5' or label[i] == '5 to 4':
-            temp.append('4 to 5')
-        if label[i] == '4 to 6' or label[i] == '6 to 4':
-            temp.append('4 to 6')
-        if label[i] == '4 to 7' or label[i] == '7 to 4':
-            temp.append('4 to 7')
-
-        if label[i] == '5 to 6' or label[i] == '6 to 5':
-            temp.append('5 to 6')
-        if label[i] == '5 to 7' or label[i] == '7 to 5':
-            temp.append('5 to 7')
-            
-        if label[i] == '6 to 7' or label[i] == '7 to 6':
-            temp.append('6 to 7')
-                
-    return temp
-
-def merge_9_sensors(ila_lablled):
-    label = ila_lablled['label'].values.tolist()
-    temp=[]
-    for i in range(0,len(label)):
-        if label[i] == '0 to 1' or label[i] == '1 to 0':
-            temp.append('0 to 1')
-        if label[i] == '0 to 2' or label[i] == '2 to 0':
-            temp.append('0 to 2')
-        if label[i] == '0 to 3' or label[i] == '3 to 0':
-            temp.append('0 to 3')
-        if label[i] == '0 to 4' or label[i] == '4 to 0':
-            temp.append('0 to 4')
-        if label[i] == '0 to 5' or label[i] == '5 to 0':
-            temp.append('0 to 5')           
-        if label[i] == '0 to 6' or label[i] == '6 to 0':
-            temp.append('0 to 6')
-        if label[i] == '0 to 7' or label[i] == '7 to 0':
-            temp.append('0 to 7')
-        if label[i] == '0 to 8' or label[i] == '8 to 0':
-            temp.append('0 to 8')
-            
-        if label[i] == '1 to 2' or label[i] == '2 to 1':
-            temp.append('1 to 2')
-        if label[i] == '1 to 3' or label[i] == '3 to 1':
-            temp.append('1 to 3')
-        if label[i] == '1 to 4' or label[i] == '4 to 1':
-            temp.append('1 to 4')
-        if label[i] == '1 to 5' or label[i] == '5 to 1':
-            temp.append('1 to 5')              
-        if label[i] == '1 to 6' or label[i] == '6 to 1':
-            temp.append('1 to 6')
-        if label[i] == '1 to 7' or label[i] == '7 to 1':
-            temp.append('1 to 7')
-        if label[i] == '1 to 8' or label[i] == '8 to 1':
-            temp.append('1 to 8')
-
-        if label[i] == '2 to 3' or label[i] == '3 to 2':
-            temp.append('2 to 3')
-        if label[i] == '2 to 4' or label[i] == '4 to 2':
-            temp.append('2 to 4')
-        if label[i] == '2 to 5' or label[i] == '5 to 2':
-            temp.append('2 to 5')           
-        if label[i] == '2 to 6' or label[i] == '6 to 2':
-            temp.append('2 to 6')
-        if label[i] == '2 to 7' or label[i] == '7 to 2':
-            temp.append('2 to 7')
-        if label[i] == '2 to 8' or label[i] == '8 to 2':
-            temp.append('2 to 8')
-            
-           
-        if label[i] == '3 to 4' or label[i] == '4 to 3':
-            temp.append('3 to 4')
-        if label[i] == '3 to 5' or label[i] == '5 to 3':
-            temp.append('3 to 5')
-        if label[i] == '3 to 6' or label[i] == '6 to 3':
-            temp.append('3 to 6')
-        if label[i] == '3 to 7' or label[i] == '7 to 3':
-            temp.append('3 to 7')
-        if label[i] == '3 to 8' or label[i] == '8 to 3':
-            temp.append('3 to 8')
-            
-            
-        if label[i] == '4 to 5' or label[i] == '5 to 4':
-            temp.append('4 to 5')
-        if label[i] == '4 to 6' or label[i] == '6 to 4':
-            temp.append('4 to 6')
-        if label[i] == '4 to 7' or label[i] == '7 to 4':
-            temp.append('4 to 7')
-        if label[i] == '4 to 8' or label[i] == '8 to 4':
-            temp.append('4 to 8')
-
-        if label[i] == '5 to 6' or label[i] == '6 to 5':
-            temp.append('5 to 6')
-        if label[i] == '5 to 7' or label[i] == '7 to 5':
-            temp.append('5 to 7')
-        if label[i] == '5 to 8' or label[i] == '8 to 5':
-            temp.append('5 to 8')
-            
-        if label[i] == '6 to 7' or label[i] == '7 to 6':
-            temp.append('6 to 7')
-        if label[i] == '6 to 8' or label[i] == '8 to 6':
-            temp.append('6 to 8')
-            
-        if label[i] == '7 to 8' or label[i] == '8 to 7':
-            temp.append('8 to 7')
-                
-    return temp
-
-
-def merge_10_sensors(ila_lablled):
-    label = ila_lablled['label'].values.tolist()
-    temp=[]
-    for i in range(0,len(label)):
-        if label[i] == '0 to 1' or label[i] == '1 to 0':
-            temp.append('0 to 1')
-        if label[i] == '0 to 2' or label[i] == '2 to 0':
-            temp.append('0 to 2')
-        if label[i] == '0 to 3' or label[i] == '3 to 0':
-            temp.append('0 to 3')
-        if label[i] == '0 to 4' or label[i] == '4 to 0':
-            temp.append('0 to 4')
-        if label[i] == '0 to 5' or label[i] == '5 to 0':
-            temp.append('0 to 5')           
-        if label[i] == '0 to 6' or label[i] == '6 to 0':
-            temp.append('0 to 6')
-        if label[i] == '0 to 7' or label[i] == '7 to 0':
-            temp.append('0 to 7')
-        if label[i] == '0 to 8' or label[i] == '8 to 0':
-            temp.append('0 to 8')
-        if label[i] == '0 to 9' or label[i] == '9 to 0':
-            temp.append('0 to 9')
-
-        if label[i] == '1 to 2' or label[i] == '2 to 1':
-            temp.append('1 to 2')
-        if label[i] == '1 to 3' or label[i] == '3 to 1':
-            temp.append('1 to 3')
-        if label[i] == '1 to 4' or label[i] == '4 to 1':
-            temp.append('1 to 4')
-        if label[i] == '1 to 5' or label[i] == '5 to 1':
-            temp.append('1 to 5')              
-        if label[i] == '1 to 6' or label[i] == '6 to 1':
-            temp.append('1 to 6')
-        if label[i] == '1 to 7' or label[i] == '7 to 1':
-            temp.append('1 to 7')
-        if label[i] == '1 to 8' or label[i] == '8 to 1':
-            temp.append('1 to 8')
-        if label[i] == '1 to 9' or label[i] == '9 to 1':
-            temp.append('1 to 9')
-
-        if label[i] == '2 to 3' or label[i] == '3 to 2':
-            temp.append('2 to 3')
-        if label[i] == '2 to 4' or label[i] == '4 to 2':
-            temp.append('2 to 4')
-        if label[i] == '2 to 5' or label[i] == '5 to 2':
-            temp.append('2 to 5')           
-        if label[i] == '2 to 6' or label[i] == '6 to 2':
-            temp.append('2 to 6')
-        if label[i] == '2 to 7' or label[i] == '7 to 2':
-            temp.append('2 to 7')
-        if label[i] == '2 to 8' or label[i] == '8 to 2':
-            temp.append('2 to 8')
-        if label[i] == '2 to 9' or label[i] == '9 to 2':
-            temp.append('2 to 9')           
-           
-        if label[i] == '3 to 4' or label[i] == '4 to 3':
-            temp.append('3 to 4')
-        if label[i] == '3 to 5' or label[i] == '5 to 3':
-            temp.append('3 to 5')
-        if label[i] == '3 to 6' or label[i] == '6 to 3':
-            temp.append('3 to 6')
-        if label[i] == '3 to 7' or label[i] == '7 to 3':
-            temp.append('3 to 7')
-        if label[i] == '3 to 8' or label[i] == '8 to 3':
-            temp.append('3 to 8')
-        if label[i] == '3 to 9' or label[i] == '9 to 3':
-            temp.append('3 to 9')
-            
-        if label[i] == '4 to 5' or label[i] == '5 to 4':
-            temp.append('4 to 5')
-        if label[i] == '4 to 6' or label[i] == '6 to 4':
-            temp.append('4 to 6')
-        if label[i] == '4 to 7' or label[i] == '7 to 4':
-            temp.append('4 to 7')
-        if label[i] == '4 to 8' or label[i] == '8 to 4':
-            temp.append('4 to 8')
-        if label[i] == '4 to 9' or label[i] == '9 to 4':
-            temp.append('4 to 9')
-
-        if label[i] == '5 to 6' or label[i] == '6 to 5':
-            temp.append('5 to 6')
-        if label[i] == '5 to 7' or label[i] == '7 to 5':
-            temp.append('5 to 7')
-        if label[i] == '5 to 8' or label[i] == '8 to 5':
-            temp.append('5 to 8')
-        if label[i] == '5 to 9' or label[i] == '9 to 5':
-            temp.append('5 to 9')
-            
-        if label[i] == '6 to 7' or label[i] == '7 to 6':
-            temp.append('6 to 7')
-        if label[i] == '6 to 8' or label[i] == '8 to 6':
-            temp.append('6 to 8')
-        if label[i] == '6 to 9' or label[i] == '9 to 6':
-            temp.append('6 to 9')
-            
-        if label[i] == '7 to 8' or label[i] == '8 to 7':
-            temp.append('8 to 7')
-        if label[i] == '7 to 9' or label[i] == '9 to 7':
-            temp.append('7 to 9')
-
-        if label[i] == '8 to 9' or label[i] == '9 to 8':
-            temp.append('8 to 9')
-                
-    return temp
-
-def labels_between_room(cleaned_ila):
-    tempDF = pd.DataFrame({})
-    temp1=[]
-    for i in range(0, len(cleaned_ila)-1):
-        room_previous_sensor = cleaned_ila.iloc[i]['changed_sensor_id'] 
-        room_next_sensor =  cleaned_ila.iloc[i+1]['changed_sensor_id']
-        label = str(int(room_previous_sensor))+' to '+str(int(room_next_sensor)) 
-        temp1.append(label)
-    tempDF['label'] = temp1
-    return tempDF
-
-# get_transition_arrays will give daily transition numbers
-def get_transition_arrays(cleaned_ila,choppedTime):
-    # count how many rooms in this user's house
-    room_num = len(cleaned_ila['changed_sensor_id'].unique().tolist())
-    # print(room_num)
-    transition=[]
-    for i in range(len(choppedTime)-1):
-        # get daily motion data
-        choppedila_day  = cleaned_ila[cleaned_ila['local_timestamp'] > choppedTime[i]]
-        choppedila_day  = choppedila_day[choppedila_day['local_timestamp'] < choppedTime[i+1]]
-        # choppedTime start  4-26, hence sometime the choppedila_day could be length 0
-        if len(choppedila_day)==0:
-            continue
-        # label the transitions and change them to merged transition labels
-        ila_lablled = labels_between_room(choppedila_day)
-
-        if room_num == 5:
-            merge_labelled_ilaList = merge_5_sensors(ila_lablled)
-        if room_num == 6:
-            merge_labelled_ilaList = merge_6_sensors(ila_lablled)
-        if room_num == 7:
-            merge_labelled_ilaList = merge_7_sensors(ila_lablled)
-        if room_num == 8:
-            merge_labelled_ilaList = merge_8_sensors(ila_lablled)
-        if room_num == 9:
-            merge_labelled_ilaList = merge_9_sensors(ila_lablled)
-        if room_num == 10:
-            merge_labelled_ilaList = merge_10_sensors(ila_lablled)
-
-        transition.append(len(merge_labelled_ilaList))
-    
-    return transition
 
 '''
  User 3-70 has mobility from 07.30 - 8.28 but sensor reading from 6.12, 7.19,7.29-8.28. 
@@ -678,34 +110,296 @@ the_XXX_user['new_date'] = pd.to_datetime(the_XXX_user["date"], format = '%d/%m/
 the_XXXAAA_user = the_XXX_user[(the_XXX_user['new_date'] >= start_time3) & (the_XXX_user['new_date'] < end_time3) ]
 reformed_mobility_list[35] = the_XXXAAA_user
 
-
-'''
-LONG COMPUTING TIME
-'''
-temp_transition=[]
-for each_user in finally_sensor_list:
-    transition = get_transition_arrays(each_user,choppedTime)
-    # remove all the 0 from transition list
-    final_transition = list(filter(lambda a: a != 0, transition))    
-    temp_transition.append(final_transition)
-
+# there are zeros in mobility, it is better to record their dates and PID
 # Ground truth mobility
 temp_mobility=[]
 for each_user_mobility in reformed_mobility_list:
     aa = each_user_mobility['VALUE'].tolist()
-    final_mobility = list(filter(lambda a: a != 0, aa))
-    temp_mobility.append(final_mobility)
+    #final_mobility = list(filter(lambda a: a != 0, aa))
+    temp_mobility.append(aa)
     
+flat_mobility = [item for sublist in temp_mobility for item in sublist]
+print('flat_mobility = ', len(flat_mobility))
     
-## get 3-121 and 3-42 dataframe
-#Mar121Date = reformed_mobility_list[9]['date'].tolist()     
-#Mar121 = pd.DataFrame({'date':Mar121Date,'transition':temp_transition[9],'step':temp_mobility[9]})   
-#Mar42Date = reformed_mobility_list[47]['date'].tolist() 
-##  Mar42Date has 95, while temp_transition[47] and temp_mobility[47] have 93 elements, so error   
-#Mar42 = pd.DataFrame({'date':Mar42Date,'transition':temp_transition[47],'step':temp_mobility[47]})   
+#############################################################################
+# Pre-selecting of useful time and data in sensor readings by remove 0
+#############################################################################
+# Delete the '0' signal in sensors, change the dataframe
+def reform_df(MotionData_ila):
+
+    MotionData_ila = MotionData_ila[MotionData_ila['sensor_value'] == 1]
+    room_list = MotionData_ila['sensor_name'].unique().tolist()
+    # the original sensor id are too complicated, change them to 0,1,2,...
+    sensor_id = list(range(len(room_list)))
+
+    allRooms = MotionData_ila['sensor_name'].values.tolist()
+    temp=[]
+    for i in range(len(allRooms)):
+        for j in range(len(room_list)):
+            if allRooms[i]==room_list[j]:
+                temp.append(sensor_id[j])
+            
+    MotionData_ila['new_sensor_id'] = temp
     
+    # up to this step, we have get the dataframe, but don't forget to convert to time object
+    datetime_list = []
+    time_list = MotionData_ila["local_timestamp"].values.tolist()
+    for elt in time_list:
+        aa = dt.datetime.strptime(elt, '%Y-%m-%d %H:%M:%S')
+        datetime_list.append(aa)
+    MotionData_ila['exact_time'] = time_list         
     
+    # Sort the datetime 
+    aaa = MotionData_ila.sort_values(by="exact_time") 
+    return aaa
+
+reformed_sensor_list=[]
+for each_PID in sensor_grouped_list:
+    PID_motiondata = each_PID[1]
+    reformed_each_df = reform_df(PID_motiondata)
+    reformed_sensor_list.append(reformed_each_df)
+    
+#----------------------------------------------------------------------------- 
+# For each unit in reformed_mobility_list and reformed_sensor_list, remove the 
+# dates that not shown in reformed_mobility_list
+cleaned_sensor_list = []
+for i in range(len(reformed_sensor_list)):
+    each_PID = reformed_sensor_list[i]
+    each_unit = reformed_mobility_list[i]
+    # for the two dataframe, check the time
+    mobility_date = each_unit.date.tolist()
+    sensor_date = each_PID.local_timestamp.tolist()
+    #  mobility has time format YY-MM-DD but sensor also has hours
+    mobility_date = [dt.datetime.strptime(date, '%d/%m/%Y').date() for date in mobility_date] 
+    sensor_date = [dt.datetime.strptime(date, '%Y-%m-%d %H:%M:%S') for date in sensor_date]
+    # sensor hours can be removed
+    sensor_date_truncated = [each_day.date() for each_day in sensor_date] 
+    # now the days that in sensor reading but not in mobilty are found
+    date_not_in_mobility = [elem for elem in sensor_date_truncated if elem not in mobility_date]
+    # remove repetitive items in date_not_in_mobility
+    date_notin_mobility = list(set(date_not_in_mobility))
+    date_notin_mobility = sorted(date_notin_mobility)
+    # transfer the list back to str format
+    aaa = [each_date.__str__() for each_date in date_notin_mobility] 
+
+    # after the for loop, each_PID will have same dates as each_unit in mobility
+    for a in aaa:
+        # find the sensor readings that should be deleted
+        deleted = each_PID[each_PID['exact_time'].str.contains(a)]
+        # remove these units from sensor reading dataframe
+        each_PID = pd.concat([each_PID, deleted]).drop_duplicates(keep=False)
+
+    cleaned_sensor_list.append(each_PID)
+ 
+#############################################################################
+# Get the num of room transition
+#############################################################################
+# Remove 'repetitive sensor'
+def remove_dup_df(motion_data):
+    # drop the duplicates in sensor_id
+    drop_dup_df = motion_data.loc[(motion_data['sensor_id'].shift() != motion_data['sensor_id'])]
+    return drop_dup_df
+#----------------------------------------------------------------------------- 
+sensor_list=[]
+for each_PID in cleaned_sensor_list:
+    cleaned_each_df = remove_dup_df(each_PID)
+    sensor_list.append(cleaned_each_df)
+
+'''
+time span for mobility: 2019/04/26 - 2019/10/29(included) (maximal 172 days in mobility_list). 
+Just remove the dates that are not in this range for sensor_list
+'''    
+# Chopped datetime       
+base = dt.datetime.strptime('2019-04-26 00:00:00', '%Y-%m-%d %H:%M:%S')
+datelist = pd.date_range(base, periods=188).tolist()
+choppedTime=[]
+for elt in datelist:
+    strg = f'{elt:%Y-%m-%d %H:%M:%S}'
+    choppedTime.append(strg)
+# Keep the sensor readings from sensor_list based on the chopped time
+start_time = choppedTime[0]
+end_time = choppedTime[-1]
+final_sensor_list=[]
+for each_user_sensor_reading in sensor_list:
+    each_user_sensor_reading = each_user_sensor_reading[(each_user_sensor_reading['local_timestamp'] > start_time) & (each_user_sensor_reading['local_timestamp'] < end_time) ]
+    final_sensor_list.append(each_user_sensor_reading)
+
 #-----------------------------------------------------------------------------  
+# get daily room transition
+
+# find maximal and minimal snesors
+max_rooms=0
+min_rooms=len(final_sensor_list[0]['new_sensor_id'].unique().tolist())
+for each_user in final_sensor_list:
+    test_user_room_list = each_user['new_sensor_id'].unique().tolist()
+    if len(test_user_room_list) >= max_rooms:
+        max_rooms = len(test_user_room_list)
+    if len(test_user_room_list) < min_rooms:
+        min_rooms = len(test_user_room_list)
+# now we know max_room=10, min_room=5
+
+'''
+If we check each PID dataframe, we will realize that some sensors are removed
+For example, originally there are 8 sensors (0-7), now after removing there are 
+5 sensors(0,2,4,6,7), so we would better change the sensor names to 0-4
+'''    
+def change_sensor_name(MotionData_ila):
+    room_list = MotionData_ila['sensor_name'].unique().tolist()
+    # the original sensor id are too complicated, change them to 0,1,2,...
+    sensor_id = list(range(len(room_list)))
+    allRooms = MotionData_ila['sensor_name'].values.tolist()
+    temp=[]
+    for i in range(len(allRooms)):
+        for j in range(len(room_list)):
+            if allRooms[i]==room_list[j]:
+                temp.append(sensor_id[j])
+            
+    MotionData_ila['changed_sensor_id'] = temp
+    return MotionData_ila
+
+finally_sensor_list=[]
+for test_user in final_sensor_list:
+    user_sensor_reading = change_sensor_name(test_user)
+    finally_sensor_list.append(user_sensor_reading)
+#-----------------------------------------------------------------------------  
+import merge_sensors as ms # make sure they are in same dir, run ms first
+
+def labels_between_room(cleaned_ila):
+    tempDF = pd.DataFrame({})
+    temp1=[]
+    for i in range(0, len(cleaned_ila)-1):
+        room_previous_sensor = cleaned_ila.iloc[i]['changed_sensor_id'] 
+        room_next_sensor =  cleaned_ila.iloc[i+1]['changed_sensor_id']
+        label = str(int(room_previous_sensor))+' to '+str(int(room_next_sensor)) 
+        temp1.append(label)
+    tempDF['label'] = temp1
+    return tempDF
+
+# get_transition_arrays will give daily transition numbers
+def get_transition_arrays(cleaned_ila,choppedTime):
+    # count how many rooms in this user's house
+    room_num = len(cleaned_ila['changed_sensor_id'].unique().tolist())
+    # print(room_num)
+    transition=[]
+    
+    first_date_in_cleaned_ila = cleaned_ila['local_timestamp'].tolist()[0]
+    last_date_in_cleaned_ila = cleaned_ila['local_timestamp'].tolist()[-1]
+    for i in range(len(choppedTime)-1):
+        # get daily motion data
+        choppedila_day  = cleaned_ila[cleaned_ila['local_timestamp'] > choppedTime[i]]
+        choppedila_day  = choppedila_day[choppedila_day['local_timestamp'] < choppedTime[i+1]]
+               
+        # choppedTime start  4-26, hence the choppedila_day is length 0 before the start date
+        if first_date_in_cleaned_ila > choppedTime[i+1] or last_date_in_cleaned_ila < choppedTime[i]:
+            continue
+        # after the first date, if there is no sensor record in that day, mark the step as 1
+        if len(choppedila_day)==0:
+            continue
+        
+        # label the transitions and change them to merged transition labels
+        ila_lablled = labels_between_room(choppedila_day)
+        if room_num == 5:
+            merge_labelled_ilaList = ms.merge_5_sensors(ila_lablled)
+        if room_num == 6:
+            merge_labelled_ilaList = ms.merge_6_sensors(ila_lablled)
+        if room_num == 7:
+            merge_labelled_ilaList = ms.merge_7_sensors(ila_lablled)
+        if room_num == 8:
+            merge_labelled_ilaList = ms.merge_8_sensors(ila_lablled)
+        if room_num == 9:
+            merge_labelled_ilaList = ms.merge_9_sensors(ila_lablled)
+        if room_num == 10:
+            merge_labelled_ilaList = ms.merge_10_sensors(ila_lablled)
+
+        transition.append(len(merge_labelled_ilaList))
+    
+    return transition
+
+
+### LONG COMPUTING TIME!
+temp_transition=[]
+for each_user in finally_sensor_list:
+    transition = get_transition_arrays(each_user,choppedTime)
+    # remove all the 0 from transition list
+    #final_transition = list(filter(lambda a: a != 0, transition))    
+    temp_transition.append(transition) 
+
+
+flat_transition = [item for sublist in temp_transition for item in sublist]
+print('flat_transition = ',  len(flat_transition))
+
+# for debug
+a1=[]
+for mob in temp_transition:
+    t = len(mob)
+    a1.append(t)
+a2=[]
+for trans in temp_mobility:
+    t = len(trans)
+    a2.append(t)  
+aaa1 = [elem for elem in a1 if elem not in a2]
+print('if aaa1_indices has list index out of range, then bug free')
+aaa1_indices = [i for i, x in enumerate(a1) if x == aaa1[1]]
+print('index = ',aaa1_indices)
+
+#############################################################################
+# If ground truth mobility have 0 in one day, then num of room transition
+# will miss that day, cause its length reduced, so we need to match it with mobility
+#############################################################################
+for i in range(len(temp_mobility)):
+    if len(temp_transition[i]) == len(temp_mobility[i]):
+        continue
+    if len(temp_transition[i]) < len(temp_mobility[i]):
+        # find where 0 locate in temp_mobility[i], it could be a list or a value
+        missing_day_0_mobility_index_list = [i for i, x in enumerate(temp_mobility[i]) if x == 0]
+        # add 0 in temp_transition[i] in front of the value
+        for index in missing_day_0_mobility_index_list:
+            temp_transition[i].insert(index, 0)
+                        
+            
+#############################################################################
+# Get the total sensor firing counts
+#############################################################################
+# Keep the sensor readings from sensor_list based on the chopped time
+# start_time = choppedTime[0]
+# end_time = choppedTime[-1]
+cleaned_sensor_list_with_chopped_time=[]
+for each_user_sensor_reading in cleaned_sensor_list:
+    each_user_sensor_reading = each_user_sensor_reading[(each_user_sensor_reading['local_timestamp'] > start_time) & (each_user_sensor_reading['local_timestamp'] < end_time) ]
+    cleaned_sensor_list_with_chopped_time.append(each_user_sensor_reading)
+
+temp_total_triggering = []
+for each_user in cleaned_sensor_list_with_chopped_time:
+    total_firing = []
+    for i in range(len(choppedTime)-1):
+        chopped_day  = each_user[each_user['local_timestamp'] > choppedTime[i]]
+        choppedila_day  = chopped_day[chopped_day['local_timestamp'] < choppedTime[i+1]]
+        total_firing_in_that_day = len(choppedila_day)
+        total_firing.append(total_firing_in_that_day)
+        final_total_firing = list(filter(lambda a: a != 0, total_firing))
+    temp_total_triggering.append(final_total_firing)
+
+    
+flat_total_firing = [item for sublist in temp_total_triggering for item in sublist]
+print('flat_total_firing = ',  len(flat_total_firing))
+#############################################################################
+# If ground truth mobility have 0 in one day, then total firing
+# will miss that day, cause its length reduced, so we need to match it with mobility
+#############################################################################
+for i in range(len(temp_mobility)):
+    if len(temp_total_triggering[i]) == len(temp_mobility[i]):
+        continue
+    if len(temp_total_triggering[i]) < len(temp_mobility[i]):
+        # find where 0 locate in temp_mobility[i], it could be a list or a value
+        missing_day_0_mobility_index_list = [i for i, x in enumerate(temp_mobility[i]) if x == 0]
+        # add 0 in temp_total_triggering[i] in front of the value
+        for index in missing_day_0_mobility_index_list:
+            temp_total_triggering[i].insert(index, 0)
+
+
+#############################################################################
+# Get the fixed-speed mobility
+#############################################################################
 '''
 For each user, the average time from room A to room B(and room B to room A) is constant by assumption.
 (Assume the user is always doing uniform linear motion in a constant speed, this speed is unknown but
@@ -757,17 +451,17 @@ def get_time_diff_list(cleaned_ila,choppedTime):
         day.append(that_day)
 
         if room_num == 5:
-            merge_labelled_ilaList = merge_5_sensors(ila_lablled)
+            merge_labelled_ilaList = ms.merge_5_sensors(ila_lablled)
         if room_num == 6:
-            merge_labelled_ilaList = merge_6_sensors(ila_lablled)
+            merge_labelled_ilaList = ms.merge_6_sensors(ila_lablled)
         if room_num == 7:
-            merge_labelled_ilaList = merge_7_sensors(ila_lablled)
+            merge_labelled_ilaList = ms.merge_7_sensors(ila_lablled)
         if room_num == 8:
-            merge_labelled_ilaList = merge_8_sensors(ila_lablled)
+            merge_labelled_ilaList = ms.merge_8_sensors(ila_lablled)
         if room_num == 9:
-            merge_labelled_ilaList = merge_9_sensors(ila_lablled)
+            merge_labelled_ilaList = ms.merge_9_sensors(ila_lablled)
         if room_num == 10:
-            merge_labelled_ilaList = merge_10_sensors(ila_lablled)
+            merge_labelled_ilaList = ms.merge_10_sensors(ila_lablled)
     
         # temp has the same length as time_diff_list, they are all for one day
         time_diff_list_all_days.append(time_diff_list)
@@ -844,15 +538,13 @@ def get_daily_sensor_derived_steps(all_the_days):
 
 #--------------------------------
 # for debug
-test_user = finally_sensor_list[58]
+test_user = finally_sensor_list[18]
 single_user_transion_time_diff, single_user_transion_time_diff_with_date = get_time_diff_list(test_user,choppedTime)
 avg_time_diff_for_labels = find_avg_time_diff_for_labels(single_user_transion_time_diff)
 daily_time_diff_sum = get_daily_time_diff_sum(single_user_transion_time_diff_with_date)
 daily_sensor_derived_steps = get_daily_sensor_derived_steps(daily_time_diff_sum)
 
-import time
-start_time = time.time()
-
+# LONG TIME COMPUTING !! ~ 278.122 seconds
 temp_sensor_derived_steps=[]
 for each_user in finally_sensor_list:
     single_user_transion_time_diff, single_user_transion_time_diff_with_date = get_time_diff_list(each_user,choppedTime)
@@ -862,24 +554,26 @@ for each_user in finally_sensor_list:
     all_the_days = get_daily_time_diff_sum(single_user_transion_time_diff_with_date)
     this_user_all_the_days = get_daily_sensor_derived_steps(all_the_days)
     # remove all the 0 from transition list
-    final_this_user_all_the_days = list(filter(lambda a: a != 0, this_user_all_the_days))    
-    temp_sensor_derived_steps.append(final_this_user_all_the_days)
+    #final_this_user_all_the_days = list(filter(lambda a: a != 0, this_user_all_the_days))    
+    temp_sensor_derived_steps.append(this_user_all_the_days)
 
-print("--- %s seconds ---" % (time.time() - start_time)) # 278.122 seconds 
+flat_sensor_derived_steps = [item for sublist in temp_sensor_derived_steps for item in sublist]
+print('flat_sensor_derived_steps = ', len(flat_sensor_derived_steps))
 
-# for debug
-a1=[]
-for mob in temp_sensor_derived_steps:
-    t = len(mob)
-    a1.append(t)
-a2=[]
-for trans in temp_mobility:
-    t = len(trans)
-    a2.append(t)  
-aaa1 = [elem for elem in a2 if elem not in a1]
+#############################################################################
+# If ground truth mobility have 0 in one day, then sensor_derived step
+# will miss that day, cause its length reduced, so we need to match it with mobility
+#############################################################################
+for i in range(len(temp_mobility)):
+    if len(temp_sensor_derived_steps[i]) == len(temp_mobility[i]):
+        continue
+    if len(temp_sensor_derived_steps[i]) < len(temp_mobility[i]):
+        # find where 0 locate in temp_mobility[i], it could be a list or a value
+        missing_day_0_mobility_index_list = [i for i, x in enumerate(temp_mobility[i]) if x == 0]
+        # add 0 in temp_sensor_derived_steps[i] in front of the value
+        for index in missing_day_0_mobility_index_list:
+            temp_sensor_derived_steps[i].insert(index, 0)
 
-print('if aaa1_indices has list index out of range, then bug free')
-aaa1_indices = [i for i, x in enumerate(a2) if x == aaa1[1]]
 #############################################################################
 # Boostrap
 #############################################################################
@@ -917,8 +611,14 @@ def bootstrap(data, B, c, func):
 
     return lower, higher
 
-flat_sensor_derived_step = [item for sublist in temp_sensor_derived_steps for item in sublist]
-result3 = bootstrap(flat_sensor_derived_step, 2000, 0.95, average)
+
+flat_mobility = [item for sublist in temp_mobility for item in sublist]
+flat_sensor_derived_steps = [item for sublist in temp_sensor_derived_steps for item in sublist]
+flat_transition = [item for sublist in temp_transition for item in sublist]
+flat_total_firing = [item for sublist in temp_total_triggering for item in sublist]
+
+result3 = bootstrap(flat_mobility, 1000, 0.95, average)
+print(result3)
 
 #############################################################################
 # Linear Regression on each of the individual
@@ -936,6 +636,7 @@ from sklearn.linear_model import LinearRegression
 
 r_sq_list1=[];intercept_list1=[];coef_list1=[]
 r_sq_list2=[];intercept_list2=[];coef_list2=[]
+r_sq_list3=[];intercept_list3=[];coef_list3=[]
 for i in range(len(temp_sensor_derived_steps)):
     each_drived_step = temp_sensor_derived_steps[i]
     each_mobility = temp_mobility[i]
@@ -978,22 +679,25 @@ for i in range(len(temp_sensor_derived_steps)):
     each_sensor_derived_steps = temp_sensor_derived_steps[i]
     each_mobility = temp_mobility[i]
     each_transition = temp_transition[i]
+    each_total_firing = temp_total_triggering[i]
 
-    each_user_rho1,each_user_p_val1 = stats.spearmanr(each_transition,each_mobility)
-    #each_user_rho2,each_user_p_val2 = stats.spearmanr(each_sensor_derived_steps,each_transition)
-    each_user_rho3,each_user_p_val3 = stats.spearmanr(each_sensor_derived_steps,each_mobility)
+    each_user_rho1,each_user_p_val1 = stats.spearmanr(each_mobility,each_transition)
+    each_user_rho2,each_user_p_val2 = stats.spearmanr(each_mobility,each_sensor_derived_steps)
+    each_user_rho3,each_user_p_val3 = stats.spearmanr(each_mobility,each_total_firing)
     
     rho_list1.append(each_user_rho1);p_val1.append(each_user_p_val1)
-    #rho_list2.append(each_user_rho2);p_val2.append(each_user_p_val2)
+    rho_list2.append(each_user_rho2);p_val2.append(each_user_p_val2)
     rho_list3.append(each_user_rho3);p_val3.append(each_user_p_val3)
 
-spearman_result = pd.DataFrame({'User':user_list,'Rho1 transition and fixed-distance':rho_list1,'p-val 1':p_val1,
-                                'Rho2 fixed-speed and fixed-distance':rho_list3,'p-val 2':p_val3})
+spearman_result = pd.DataFrame({'User':user_list,'Rho1 mobility and transition':rho_list1,'p-val 1':p_val1,
+                                'Rho2 mobility and fixed-speed':rho_list2,'p-val 2':p_val2,
+                                'Rho3 mobility and total_firing':rho_list3,'p-val 3':p_val3})
 
 spearman_result.to_csv(r'D:\DACS\Individual Participant-correlation coefficient.csv')     
 # count rho2 and rho3 moderate corr (0.6<rho<0.8)
 count_moderate3 = sum(map(lambda x : 0.6<x<0.8, rho_list3))
 count_weak3 = sum(map(lambda x : x<0.6, rho_list3))
+
 #############################################################################
 # Case Study: 3-1
 #############################################################################
@@ -1018,24 +722,24 @@ def get_transition_in_dates(cleaned_ila,choppedTime):
         day.append(that_day)
         
         if room_num == 5:
-            merge_labelled_ilaList = merge_5_sensors(ila_lablled)
+            merge_labelled_ilaList = ms.merge_5_sensors(ila_lablled)
         if room_num == 6:
-            merge_labelled_ilaList = merge_6_sensors(ila_lablled)
+            merge_labelled_ilaList = ms.merge_6_sensors(ila_lablled)
         if room_num == 7:
-            merge_labelled_ilaList = merge_7_sensors(ila_lablled)
+            merge_labelled_ilaList = ms.merge_7_sensors(ila_lablled)
         if room_num == 8:
-            merge_labelled_ilaList = merge_8_sensors(ila_lablled)
+            merge_labelled_ilaList = ms.merge_8_sensors(ila_lablled)
         if room_num == 9:
-            merge_labelled_ilaList = merge_9_sensors(ila_lablled)
+            merge_labelled_ilaList = ms.merge_9_sensors(ila_lablled)
         if room_num == 10:
-            merge_labelled_ilaList = merge_10_sensors(ila_lablled)
+            merge_labelled_ilaList = ms.merge_10_sensors(ila_lablled)
 
         transition.append(len(merge_labelled_ilaList))
 
     merged_df = pd.DataFrame({'Day':day,'Transition daily':transition})
     return merged_df
 
-index=9 # 3-1: index =0, 3-121: index=9
+index=0 # 3-1: index =0, 3-121: index=9
 case = finally_sensor_list[index]
 case_df = get_transition_in_dates(case,choppedTime)
 case_mobility = temp_sensor_derived_steps[index]
@@ -1045,9 +749,9 @@ case_df['mobility'] = temp_mobility[index]
 #case_df.to_csv(r'D:\DACS\Archive\case_df.csv')
 # now get Y axis and X axis
 dates = [pd.to_datetime(date) for date in case_df['Day']]
+
 # set the plot
 plt.figure(figsize =(12,9))
-
 plt.subplot(2, 1, 1)
 plt.scatter(dates, case_df['mobility'],label='Fixed-distance Mobility',s =20, c = 'red')
 plt.grid(True,alpha=0.5)
@@ -1067,7 +771,6 @@ plt.xlim(dates[0],dates[-1])
 #-----------------------
 # get linear regression plot
 plt.figure(figsize =(10,4))
-plt.xlim(0,850);plt.ylim(0,100)
 # m = slope, b=intercept
 m, b = np.polyfit(case_df['mobility'], case_df['Transition daily'], 1)
 r_squared = r_sq_list2[index]
@@ -1078,7 +781,8 @@ plt.grid(True,alpha=0.5)
 
 plt.xlabel('Mobility in Steps')
 plt.ylabel('Transition Counts')
-   
+ 
+  
 #############################################################################
 # Correlation Comparision
 #############################################################################
@@ -1086,15 +790,17 @@ plt.ylabel('Transition Counts')
 flat_mobility = [item for sublist in temp_mobility for item in sublist]
 flat_sensor_derived_steps = [item for sublist in temp_sensor_derived_steps for item in sublist]
 flat_transition = [item for sublist in temp_transition for item in sublist]
+flat_total_firing = [item for sublist in temp_total_triggering for item in sublist]
 
-each_user_rho1,each_user_p_val1 = stats.spearmanr(flat_sensor_derived_steps,flat_mobility)
-print('spearmanr flat_sensor_derived_steps VS flat_mobility rho:',each_user_rho1)
-print('spearmanr flat_sensor_derived_steps VS flat_mobility p-val',each_user_p_val1)
 
-each_user_rho2,each_user_p_val2 = stats.spearmanr(flat_sensor_derived_steps,flat_transition)
-print('spearmanr flat_sensor_derived_steps VS flat_transition rho:',each_user_rho2)
-print('spearmanr flat_sensor_derived_steps VS flat_transition p-val',each_user_p_val2)
+each_user_rho1,each_user_p_val1 = stats.spearmanr(flat_mobility,flat_transition)
+print('spearmanr all_mobility VS all_num_of_transition rho:',each_user_rho1)
+print('spearmanr all_mobility VS all_num_of_transition p-val',each_user_p_val1)
 
-each_user_rho3,each_user_p_val3 = stats.spearmanr(flat_transition,flat_mobility)
-print('spearmanr flat_transition VS flat_mobility rho:',each_user_rho3)
-print('spearmanr flat_transition VS flat_mobility p-val',each_user_p_val3)
+each_user_rho2,each_user_p_val2 = stats.spearmanr(flat_mobility,flat_sensor_derived_steps)
+print('spearmanr all_mobility VS all_fix_speed_step rho:',each_user_rho2)
+print('spearmanr all_mobility VS all_fix_speed_step p-val',each_user_p_val2)
+
+each_user_rho3,each_user_p_val3 = stats.spearmanr(flat_mobility,flat_total_firing)
+print('spearmanr all_mobility VS all_total_firing rho:',each_user_rho3)
+print('spearmanr all_mobility VS all_total_firing p-val',each_user_p_val3)
