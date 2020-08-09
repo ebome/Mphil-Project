@@ -40,8 +40,7 @@ unit_not_in_mobility = [elem for elem in people_list if elem not in people_list_
 # The ~ is a not operator 
 new_dacs_sensor = all_dacs_sensor[~all_dacs_sensor.PID.isin(unit_not_in_mobility)]
 # drop the multi-residential houses from all_dacs_mobility,3-157 has 2 days data, drop too
-unit_to_remove = ['3-102','3-112','3-159','3-175','3-131','3-164','3-157','3-42',
-                                
+unit_to_remove = ['3-102','3-112','3-159','3-175','3-131','3-164','3-157','3-42',                               
                                 '3-7','3-10','3-15','3-16','3-20','3-35','3-38','3-51','3-55',
                                 '3-57','3-59','3-62','3-66','3-67','3-80','3-84','3-91','3-92',
                                 '3-93','3-94','3-105','3-114','3-122','3-125','3-126','3-130',
@@ -194,7 +193,7 @@ for i in range(len(reformed_sensor_list)):
 #############################################################################
 # Get the num of room transition
 #############################################################################
-# Remove 'repetitive sensor'
+# Remove 'repetitive sensor'， this function only keeps the first record
 def remove_dup_df(motion_data):
     # drop the duplicates in sensor_id
     drop_dup_df = motion_data.loc[(motion_data['sensor_id'].shift() != motion_data['sensor_id'])]
@@ -400,6 +399,21 @@ for i in range(len(temp_mobility)):
 #############################################################################
 # Get the fixed-speed mobility
 #############################################################################
+# remove consecutive deuplicats and keep the first and last  
+# https://stackoverflow.com/questions/51269456/pandas-delete-consecutive-duplicates-but-keep-the-first-and-last-value
+def remove_consecutive_dup(one_user_sensor_data):
+    # know how many sensors in this user house
+    s = change_sensor_name(one_user_sensor_data)
+    num_of_rooms=len(s['changed_sensor_id'].unique().tolist())
+    for i in range(num_of_rooms):
+        s = s.loc[s['changed_sensor_id'].replace(i,np.nan).ffill(limit=1).bfill(limit=1).notnull()]
+    return s
+
+remove_consecutive_dup_motion_data = []
+for i in range(len(cleaned_sensor_list)):
+    aaa = remove_consecutive_dup(cleaned_sensor_list[i])
+    remove_consecutive_dup_motion_data.append(aaa)
+
 '''
 For each user, the average time from room A to room B(and room B to room A) is constant by assumption.
 (Assume the user is always doing uniform linear motion in a constant speed, this speed is unknown but
@@ -417,15 +431,19 @@ def labelled_room_and_time_diff(cleaned_ila):
     for i in range(0, len(cleaned_ila)-1):
         room_previous_sensor = cleaned_ila.iloc[i]['changed_sensor_id'] 
         room_next_sensor =  cleaned_ila.iloc[i+1]['changed_sensor_id']
-        label = str(int(room_previous_sensor))+' to '+str(int(room_next_sensor)) 
-        temp1.append(label)
+        if room_previous_sensor == room_next_sensor: 
+            continue
         
-        room_previous_time = cleaned_ila.iloc[i]['local_timestamp'] 
-        room_previous_time = dt.datetime.strptime(room_previous_time, '%Y-%m-%d %H:%M:%S')
-        room_next_time =  cleaned_ila.iloc[i+1]['local_timestamp']
-        room_next_time = dt.datetime.strptime(room_next_time, '%Y-%m-%d %H:%M:%S')
-        time_diff =  (room_next_time - room_previous_time).seconds
-        temp2.append(time_diff)
+        # only if room_previous_sensor != room_next_sensor indicate room transition
+        elif room_previous_sensor != room_next_sensor:
+            label = str(int(room_previous_sensor))+' to '+str(int(room_next_sensor)) 
+            temp1.append(label)
+            room_previous_time = cleaned_ila.iloc[i]['local_timestamp'] 
+            room_previous_time = dt.datetime.strptime(room_previous_time, '%Y-%m-%d %H:%M:%S')
+            room_next_time =  cleaned_ila.iloc[i+1]['local_timestamp']
+            room_next_time = dt.datetime.strptime(room_next_time, '%Y-%m-%d %H:%M:%S')
+            time_diff =  (room_next_time - room_previous_time).seconds
+            temp2.append(time_diff)
 
     tempDF['label'] = temp1
     tempDF['time difference'] = temp2
@@ -478,81 +496,60 @@ def get_time_diff_list(cleaned_ila,choppedTime):
     return single_user_transion_time_diff, single_user_transion_time_diff_with_date
 
 #--------------------------------  
-#test_user = finally_sensor_list[10]
-#single_user_transion_time_diff, single_user_transion_time_diff_with_date = get_time_diff_list(test_user,choppedTime)
+test_user = remove_consecutive_dup_motion_data[10]
+single_user_transion_time_diff, single_user_transion_time_diff_with_date = get_time_diff_list(test_user,choppedTime)
+
+aaa = single_user_transion_time_diff_with_date['transition label'].tolist()[0]
+aaab = [x for xs in aaa for x in xs.split(',')]
 
 #--------------------------------  
 def find_avg_time_diff_for_labels(single_user_transion_time_diff):
     # find the avg time diff of each label
     time_diff_grouped_list = list(single_user_transion_time_diff.groupby(['transition label']))
 
-    avg=[];labels=[]
+    avg=[];labels=[];median =[]
     for each_label in time_diff_grouped_list:
         each_label_avg = each_label[1]['time diff'].mean()
+        each_label_median =  each_label[1]['time diff'].median()
         avg.append(each_label_avg)
+        median.append(each_label_median)
         labels.append(each_label[0])
-    reciprocal = [1/i for i in avg]
+#    reciprocal = [1/i for i in avg]
     avg_time_diff_for_labels = pd.DataFrame({'label':labels,'avg time(s)':avg,
-                                             'reciprocal(unit/s)':reciprocal})
+                                             'median time(s)':median})
     return avg_time_diff_for_labels
 #--------------------------------  
-#avg_time_diff_for_labels = find_avg_time_diff_for_labels(single_user_transion_time_diff)
+avg_and_median_time_diff_for_labels = find_avg_time_diff_for_labels(single_user_transion_time_diff)
+df = avg_and_median_time_diff_for_labels.copy(deep=True)
+data_dict = dict(zip(df['label'].tolist(), df['avg time(s)'].tolist()))
+[data_dict[x] for x in aaab]
+#--------------------------------  
+def get_daily_sensor_derived_steps(avg_and_median_time_diff_for_labels, single_user_transion_time_diff_with_date):
+    step_speed = 1.57 # value with unit: steps/second
+    df = avg_and_median_time_diff_for_labels.copy(deep=True)
+    data_dict = dict(zip(df['label'].tolist(), df['avg time(s)'].tolist()))
 
-#--------------------------------
-# For each day, the total time for A-->B can be computed from single_user_transion_time_diff_with_date  
-def get_daily_time_diff_sum(single_user_transion_time_diff_with_date):
-    all_the_days=[]
-    for row in single_user_transion_time_diff_with_date.iterrows(): # row is a tuple
-        time_diff_list_that_day = row[1]['time diff']
-        label_list_that_day = row[1]['transition label']
-        temp_df_that_day = pd.DataFrame({'transition label':label_list_that_day,
-                            'time diff':time_diff_list_that_day})
-    
-        temp_df_that_day_grouped = list(temp_df_that_day.groupby(['transition label']))
-        total_time_diff_for_that_label=[];temp_label=[]
-    
-        for each_label in temp_df_that_day_grouped:
-            each_label_time_diff_sum = each_label[1]['time diff'].sum()
-            total_time_diff_for_that_label.append(each_label_time_diff_sum)
-            temp_label.append(each_label[0])
-
-        daily_time_diff_sum = pd.DataFrame({'label':temp_label,
-                'daily time diff sum(s)':total_time_diff_for_that_label})
+    # find every day room transition time avg/mediian sum 
+    all_day_transition_labels = single_user_transion_time_diff_with_date['transition label'].tolist()
+    all_days_fixed_speed_mobility=[]
+    for daily_transition_labels in all_day_transition_labels:
+        split_daily_transition_labels = [x for xs in daily_transition_labels for x in xs.split(',')]
+        split_daily_transition_time = [data_dict[x] for x in split_daily_transition_labels]
         
-        all_the_days.append(daily_time_diff_sum)
-    return all_the_days
-#--------------------------------
-# daily_time_diff_sum = get_daily_time_diff_sum(single_user_transion_time_diff_with_date)
-
-def get_daily_sensor_derived_steps(all_the_days):
-    step_speed = 1.57
-    this_user_all_the_days=[]
-    for daily_time_diff_sum in all_the_days:
-        # Combine daily time diff sums with the avg_time_diff_for_labels
-        merged_time_diff_df = pd.merge(avg_time_diff_for_labels, daily_time_diff_sum, on="label")
-        merged_time_diff_df['daily units walked'] = merged_time_diff_df['reciprocal(unit/s)'] * merged_time_diff_df['daily time diff sum(s)']
-        merged_time_diff_df['total steps'] = merged_time_diff_df['daily units walked'] * step_speed
-        daily_sensor_derived_steps = merged_time_diff_df['total steps'].sum()
-        this_user_all_the_days.append(daily_sensor_derived_steps)
-    return this_user_all_the_days
+        daily_total_transition_time = sum(split_daily_transition_time)
+        daily_sensor_derived_steps = step_speed * daily_total_transition_time
+        all_days_fixed_speed_mobility.append(daily_sensor_derived_steps)
+    return all_days_fixed_speed_mobility
 
 #--------------------------------
-# for debug
-test_user = finally_sensor_list[18]
-single_user_transion_time_diff, single_user_transion_time_diff_with_date = get_time_diff_list(test_user,choppedTime)
-avg_time_diff_for_labels = find_avg_time_diff_for_labels(single_user_transion_time_diff)
-daily_time_diff_sum = get_daily_time_diff_sum(single_user_transion_time_diff_with_date)
-daily_sensor_derived_steps = get_daily_sensor_derived_steps(daily_time_diff_sum)
-
 # LONG TIME COMPUTING !! ~ 278.122 seconds
 temp_sensor_derived_steps=[]
-for each_user in finally_sensor_list:
+for each_user in remove_consecutive_dup_motion_data:
     single_user_transion_time_diff, single_user_transion_time_diff_with_date = get_time_diff_list(each_user,choppedTime)
     # get the avg time diff for this user 
-    avg_time_diff_for_labels = find_avg_time_diff_for_labels(single_user_transion_time_diff)
+    avg_and_median_time_diff_for_labels = find_avg_time_diff_for_labels(single_user_transion_time_diff)
     # now for this user, every day there is a mobility. In total there are X days mobility
-    all_the_days = get_daily_time_diff_sum(single_user_transion_time_diff_with_date)
-    this_user_all_the_days = get_daily_sensor_derived_steps(all_the_days)
+    this_user_all_the_days = get_daily_sensor_derived_steps(avg_and_median_time_diff_for_labels,single_user_transion_time_diff_with_date)
     # remove all the 0 from transition list
     #final_this_user_all_the_days = list(filter(lambda a: a != 0, this_user_all_the_days))    
     temp_sensor_derived_steps.append(this_user_all_the_days)
@@ -671,9 +668,9 @@ least_square_result.to_csv(r'D:\DACS\Individual Participant-linear regression.cs
 count_small_R_1 = sum(map(lambda x : x<0.5, r_sq_list1))
 count_large_R_2 = sum(map(lambda x : x>0.8, r_sq_list2))    
 
-    
-#-----------------------------------------------------------------------------  
+#############################################################################
 # Get spearman correlation
+#############################################################################
 rho_list1=[];rho_list2=[];rho_list3=[];p_val1=[];p_val2=[];p_val3=[]
 for i in range(len(temp_sensor_derived_steps)):
     each_sensor_derived_steps = temp_sensor_derived_steps[i]
@@ -697,6 +694,37 @@ spearman_result.to_csv(r'D:\DACS\Individual Participant-correlation coefficient.
 # count rho2 and rho3 moderate corr (0.6<rho<0.8)
 count_moderate3 = sum(map(lambda x : 0.6<x<0.8, rho_list3))
 count_weak3 = sum(map(lambda x : x<0.6, rho_list3))
+
+# se the paired t test between two correlations
+ttest,pval = stats.ttest_rel(rho_list1,rho_list2)
+print('paired t test = ',ttest, ', p-value = ',pval)
+
+
+#############################################################################
+# Paired t test
+#############################################################################
+ttest_list1=[];pval_list1=[];ttest_list2=[];pval_list2=[];ttest_list3=[];pval_list3=[]
+for i in range(len(temp_sensor_derived_steps)):
+    each_sensor_derived_steps = temp_sensor_derived_steps[i]
+    each_mobility = temp_mobility[i]
+    each_transition = temp_transition[i]
+    each_total_firing = temp_total_triggering[i]
+
+    ttest1,pval1 = stats.ttest_rel(each_mobility,each_transition)
+    ttest2,pval2 = stats.ttest_rel(each_mobility,each_sensor_derived_steps)
+    ttest3,pval3 = stats.ttest_rel(each_mobility,each_total_firing)
+
+    ttest_list1.append(ttest1);pval_list1.append(pval1)
+    ttest_list2.append(ttest2);pval_list2.append(pval2)
+    ttest_list3.append(ttest3);pval_list3.append(pval3)
+
+paire_ttest_result = pd.DataFrame({'User':user_list,'ttest mobility and transition':ttest_list1,'p-val 1':pval_list1,
+                                'ttest mobility and fixed-speed':ttest_list2,'p-val 2':pval_list2,
+                                'ttest mobility and total_firing':ttest_list3,'p-val 3':pval_list3})
+
+paire_ttest_result.to_csv(r'D:\DACS\Individual Participant paired T test.csv')     
+# count rho2 and rho3 moderate corr (0.6<rho<0.8)
+
 
 #############################################################################
 # Case Study: 3-1
