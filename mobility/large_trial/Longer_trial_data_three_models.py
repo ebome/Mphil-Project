@@ -3,6 +3,8 @@ import pandas as pd
 import datetime as dt
 import numpy as np
 from matplotlib import pyplot as plt
+import copy
+
 
 
 all_dacs_sensor = pd.read_csv(r'D:\DACS\Archive\all_user_motion_sensor_up_to_may.csv')
@@ -41,10 +43,12 @@ sensor_grouped_list = list(solitary_dacs_sensor.groupby(['PID']))
 # and data in sensor readings by remove 0
 #############################################################################
 # reform the mobility since cleaned_sensor_list and mobility_list have same PID units
-reformed_mobility_list=[]    
+reformed_mobility_list_temp=[]    
 for each_unit in mobility_grouped_list:
     unit_motiondata = each_unit[1]
-    reformed_mobility_list.append(unit_motiondata)
+    # remove all zeros in mobility
+    unit_motiondata = unit_motiondata[unit_motiondata['value']!= 0]
+    reformed_mobility_list_temp.append(unit_motiondata)
     
 #-------------------------------------------------
 # Delete the '0' signal in sensors, change the dataframe
@@ -77,12 +81,42 @@ def reform_df(MotionData_ila):
     aaa = MotionData_ila.sort_values(by="exact_time") 
     return aaa
     
-reformed_sensor_list=[]
+reformed_sensor_list_temp=[]
 for each_PID in sensor_grouped_list:
     PID_motiondata = each_PID[1]
     reformed_each_df = reform_df(PID_motiondata)
-    reformed_sensor_list.append(reformed_each_df)
+    reformed_sensor_list_temp.append(reformed_each_df)
 
+#-------------------------------------------------
+# reformed_mobility_list have removed some users, so the users should be removed
+# in reformed_sensor_list as well
+reformed_sensor_list = [];reformed_mobility_list=[]
+for i in range(len(reformed_mobility_list_temp)):
+    if len(reformed_mobility_list_temp[i]) > 10:
+        reformed_sensor_list.append(reformed_sensor_list_temp[i])
+        reformed_mobility_list.append(reformed_mobility_list_temp[i])
+
+#-------------------------------------------------
+# get users in mobility, check whether two are equal
+user_list_mob=[];user_list_sensor=[]
+for i in range(len(reformed_mobility_list)):
+    user_list_mob.append(reformed_mobility_list[i]['PID'].tolist()[0])
+    user_list_sensor.append(reformed_sensor_list[i]['PID'].tolist()[0])
+    
+def debugging_two_temp_list_value(a1,a2):
+    '''
+    a1 and a2 must have same length
+    '''
+    bool_list=[]
+    for i in range(len(a1)):
+        if a1[i]==a2[i]:
+            bool_list.append(True)
+        else:
+            bool_list.append(False)
+    return bool_list
+
+are_user_same = debugging_two_temp_list_value(user_list_mob,user_list_sensor)
+    
 #----------------------------------------------------------------------------- 
 # For each unit in reformed_mobility_list and reformed_sensor_list, remove the 
 # dates that in reformed_sensor_list but not in reformed_mobility_list
@@ -154,10 +188,7 @@ for i in range(len(cleaned_sensor_list)):
 temp_mobility=[]
 for each_user_mobility in cleaned_mobility_list:
     aa = each_user_mobility['value'].tolist()
-    if len(aa)<29:
-        continue
-    else:
-        temp_mobility.append(aa) 
+    temp_mobility.append(aa) 
     
 flat_mobility = [item for sublist in temp_mobility for item in sublist]
 print('flat_mobility = ', len(flat_mobility))
@@ -286,10 +317,7 @@ def get_transition_arrays(cleaned_ila,choppedTime):
 temp_transition=[]
 for each_user in finally_sensor_list:
     transition = get_transition_arrays(each_user,choppedTime)
-    if len(transition)<29:
-        continue
-    else:
-        temp_transition.append(transition) 
+    temp_transition.append(transition) 
 
 flat_transition = [item for sublist in temp_transition for item in sublist]
 print('flat_transition = ',  len(flat_transition))
@@ -301,35 +329,59 @@ for mob in temp_transition:
 a_temp_mobility=[]
 for trans in temp_mobility:
     a_temp_mobility.append(len(trans))  
-
-def debugging_two_temp_list_value(a1,a2):
-    bool_list=[]
-    for i in range(len(a1)):
-        if a1[i]==a2[i]:
-            bool_list.append(True)
-        else:
-            bool_list.append(False)
-    return bool_list
     
 aaa_indices_mob_trans = debugging_two_temp_list_value(a_temp_transition,a_temp_mobility)
 print('if indices has all TRUE in elements, then bug free')
 
+plt.figure(figsize=(18,6))
+plt.plot(temp_transition[35])
+plt.title('daily room transition as mobility')
 
 #############################################################################
+# DEBUG section
 # If ground truth mobility have 0 in one day, then num of room transition
 # will miss that day, cause its length reduced, so we need to match it with mobility
 #############################################################################
+temp_transition_copied = copy.deepcopy(temp_transition)
+
 for i in range(len(temp_mobility)):
     if len(temp_transition[i]) == len(temp_mobility[i]):
         continue
-    if len(temp_transition[i]) < len(temp_mobility[i]):
-        # find where 0 locate in temp_mobility[i], it could be a list or a value
-        missing_day_0_mobility_index_list = [i for i, x in enumerate(temp_mobility[i]) if x == 0]
+    if len(temp_transition[i]) != len(temp_mobility[i]):
+        user_sensor_readings = finally_sensor_list[i]
+        user_mobility = cleaned_mobility_list[i]
+        sensor_date = user_sensor_readings['exact_time'].values.tolist()              
+        user_sensor_date = [dt.datetime.strptime(date[0:19], '%Y-%m-%d %H:%M:%S') for date in sensor_date]
+        user_sensor_date = [each_day.date() for each_day in user_sensor_date] 
+        user_sensor_date_unique = sorted(list(set(user_sensor_date))) # distinct dates
+        user_mobility_date_unique = user_mobility['local_timestamp'].values.tolist()
+        # compare user_sensor_date_unique and user_mobility_date_unique to find the missing items in user_sensor_date_unique
+        missing_days_in_sensor = list(set(user_mobility_date_unique) - set(user_sensor_date_unique))
+
+        missing_days_in_sensor_index_list = []
+        for each_day in missing_days_in_sensor:
+            missing_days_in_sensor_index = [i for i, x in enumerate(user_mobility_date_unique) if x == each_day]
+            missing_days_in_sensor_index_list.append(missing_days_in_sensor_index)
+
         # add 0 in temp_transition[i] in front of the value
-        for index in missing_day_0_mobility_index_list:
-            temp_transition[i].insert(index, 0)
-                        
-            
+        for index in missing_days_in_sensor_index_list:
+            temp_transition_copied[i].insert(index[0], 0)
+
+# for debug
+index=5
+user_sensor_readings = finally_sensor_list[index]
+user_mobility = cleaned_mobility_list[index]
+sensor_date = user_sensor_readings['exact_time'].values.tolist()              
+user_sensor_date = [dt.datetime.strptime(date[0:19], '%Y-%m-%d %H:%M:%S') for date in sensor_date]
+user_sensor_date = [each_day.date() for each_day in user_sensor_date] 
+user_sensor_date_unique = sorted(list(set(user_sensor_date))) # distinct dates
+user_mobility_date_unique = user_mobility['local_timestamp'].values.tolist()
+missing_days_in_sensor = list(set(user_mobility_date_unique) - set(user_sensor_date_unique))
+missing_days_in_sensor_index_list = []
+for each_day in missing_days_in_sensor:
+    missing_days_in_sensor_index = [i for i, x in enumerate(user_mobility_date_unique) if x == each_day]
+    missing_days_in_sensor_index_list.append(missing_days_in_sensor_index)
+
 #############################################################################
 # Get the total sensor firing counts
 #############################################################################
@@ -346,11 +398,7 @@ for each_user in cleaned_sensor_list:
 
 temp_total_triggering = []
 for each_user_total_firing in all_total_triggering:
-    if len(each_user_total_firing)<29:
-        continue
-    else:
-        temp_total_triggering.append(each_user_total_firing) 
-
+    temp_total_triggering.append(each_user_total_firing) 
     
 flat_total_firing = [item for sublist in temp_total_triggering for item in sublist]
 print('flat_total_firing = ',  len(flat_total_firing))
@@ -367,7 +415,6 @@ for i in range(len(temp_mobility)):
         # add 0 in temp_total_triggering[i] in front of the value
         for index in missing_day_0_mobility_index_list:
             temp_total_triggering[i].insert(index, 0)
-
 
 #############################################################################
 # Get the fixed-speed mobility
@@ -487,7 +534,6 @@ def find_avg_time_diff_for_labels(single_user_transion_time_diff):
         avg.append(each_label_avg)
         median.append(each_label_median)
         labels.append(each_label[0])
-#    reciprocal = [1/i for i in avg]
     avg_time_diff_for_labels = pd.DataFrame({'label':labels,'avg time(s)':avg,
                                              'median time(s)':median})
     return avg_time_diff_for_labels
@@ -523,11 +569,7 @@ for each_user in remove_consecutive_dup_motion_data:
     avg_and_median_time_diff_for_labels = find_avg_time_diff_for_labels(single_user_transion_time_diff)
     # now for this user, every day there is a mobility. In total there are X days mobility
     this_user_all_the_days = get_daily_sensor_derived_steps(avg_and_median_time_diff_for_labels,single_user_transion_time_diff_with_date)
-    if len(this_user_all_the_days)<29:
-        continue
-    else:
-        temp_sensor_derived_steps.append(this_user_all_the_days) 
-
+    temp_sensor_derived_steps.append(this_user_all_the_days) 
 
 flat_sensor_derived_steps = [item for sublist in temp_sensor_derived_steps for item in sublist]
 print('flat_sensor_derived_steps = ', len(flat_sensor_derived_steps))
@@ -535,11 +577,9 @@ print('flat_sensor_derived_steps = ', len(flat_sensor_derived_steps))
 # for debug
 a_temp_sensor_derived_steps=[]
 for fix_speed_mob in temp_sensor_derived_steps:
-    a_temp_sensor_derived_steps.append(len(fix_speed_mob))
-    
+    a_temp_sensor_derived_steps.append(len(fix_speed_mob))    
 aaa_indices_mob_fixspeed = debugging_two_temp_list_value(a_temp_sensor_derived_steps,a_temp_mobility)
 print('if indices has all TRUE in elements, then bug free')
-
 
 #############################################################################
 # If ground truth mobility have 0 in one day, then sensor_derived step
@@ -604,11 +644,6 @@ print(result3)
 #############################################################################
 # Linear Regression on each of the individual
 #############################################################################
-user_list=[]
-for each_PID in sensor_grouped_list:
-    PID_name = each_PID[0]
-    user_list.append(PID_name)
-
 
 from sklearn.linear_model import LinearRegression
 # get the logistic regression for every user
@@ -642,7 +677,7 @@ for i in range(len(temp_sensor_derived_steps)):
     intercept_list2.append(model2.intercept_)
     coef_list2.append(model2.coef_)
 
-least_square_result = pd.DataFrame({'User':user_list,'a0':intercept_list1,
+least_square_result = pd.DataFrame({'User':user_list_mob,'a0':intercept_list1,
                                'a1':coef_list1,'R^2 1':r_sq_list1,
                                'b0':intercept_list2,
                                'b1':coef_list2,'R^2 2':r_sq_list2})
@@ -670,11 +705,11 @@ for i in range(len(temp_sensor_derived_steps)):
     rho_list2.append(each_user_rho2);p_val2.append(each_user_p_val2)
     rho_list3.append(each_user_rho3);p_val3.append(each_user_p_val3)
 
-spearman_result = pd.DataFrame({'User':user_list,'Rho1 mobility and transition':rho_list1,'p-val 1':p_val1,
+spearman_result = pd.DataFrame({'User':user_list_mob,'Rho1 mobility and transition':rho_list1,'p-val 1':p_val1,
                                 'Rho2 mobility and fixed-speed':rho_list2,'p-val 2':p_val2,
                                 'Rho3 mobility and total_firing':rho_list3,'p-val 3':p_val3})
 
-spearman_result.to_csv(r'D:\DACS\Individual Participant-correlation coefficient.csv')     
+spearman_result.to_csv(r'D:\DACS\dasc individual correlation coefficients data up to 2020 May.csv')     
 # count rho2 and rho3 moderate corr (0.6<rho<0.8)
 count_moderate3 = sum(map(lambda x : 0.6<x<0.8, rho_list3))
 count_weak3 = sum(map(lambda x : x<0.6, rho_list3))
@@ -702,7 +737,7 @@ for i in range(len(temp_sensor_derived_steps)):
     ttest_list2.append(ttest2);pval_list2.append(pval2)
     ttest_list3.append(ttest3);pval_list3.append(pval3)
 
-paire_ttest_result = pd.DataFrame({'User':user_list,'ttest mobility and transition':ttest_list1,'p-val 1':pval_list1,
+paire_ttest_result = pd.DataFrame({'User':user_list_mob,'ttest mobility and transition':ttest_list1,'p-val 1':pval_list1,
                                 'ttest mobility and fixed-speed':ttest_list2,'p-val 2':pval_list2,
                                 'ttest mobility and total_firing':ttest_list3,'p-val 3':pval_list3})
 
@@ -794,7 +829,6 @@ plt.grid(True,alpha=0.5)
 plt.xlabel('Mobility in Steps')
 plt.ylabel('Transition Counts')
  
-  
 #############################################################################
 # Correlation Comparision
 #############################################################################
