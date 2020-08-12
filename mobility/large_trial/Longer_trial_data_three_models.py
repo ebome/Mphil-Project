@@ -690,7 +690,7 @@ count_large_R_2 = sum(map(lambda x : x>0.8, r_sq_list2))
 #############################################################################
 # Get spearman correlation
 #############################################################################
-rho_list1=[];rho_list2=[];rho_list3=[];p_val1=[];p_val2=[];p_val3=[]
+rho_list1=[];rho_list2=[];rho_list3=[];p_val1=[];p_val2=[];p_val3=[];valid_day=[]
 for i in range(len(temp_sensor_derived_steps)):
     each_sensor_derived_steps = temp_sensor_derived_steps[i]
     each_mobility = temp_mobility[i]
@@ -704,8 +704,10 @@ for i in range(len(temp_sensor_derived_steps)):
     rho_list1.append(each_user_rho1);p_val1.append(each_user_p_val1)
     rho_list2.append(each_user_rho2);p_val2.append(each_user_p_val2)
     rho_list3.append(each_user_rho3);p_val3.append(each_user_p_val3)
+    valid_day.append(len(each_mobility))
 
-spearman_result = pd.DataFrame({'User':user_list_mob,'Rho1 mobility and transition':rho_list1,'p-val 1':p_val1,
+spearman_result = pd.DataFrame({'User':user_list_mob,'Valid days':valid_day,
+                                'Rho1 mobility and transition':rho_list1,'p-val 1':p_val1,
                                 'Rho2 mobility and fixed-speed':rho_list2,'p-val 2':p_val2,
                                 'Rho3 mobility and total_firing':rho_list3,'p-val 3':p_val3})
 
@@ -716,10 +718,11 @@ count_weak3 = sum(map(lambda x : x<0.6, rho_list3))
 
 # se the paired t test between two correlations
 ttest,pval = stats.ttest_rel(rho_list1,rho_list2)
-print('paired t test = ',ttest, ', p-value = ',pval)
+print('paired t test = ','%.5f' %ttest, ', p-value = ','%.4f' %pval)
+ttest2,pval2 = stats.ttest_rel(rho_list1,rho_list3)
+print('paired t test = ','%.5f' %ttest2, ', p-value = ','%.4f' %pval2)
 
-
-#############################################################################
+############################################################################
 # Paired t test
 #############################################################################
 ttest_list1=[];pval_list1=[];ttest_list2=[];pval_list2=[];ttest_list3=[];pval_list3=[]
