@@ -2,7 +2,7 @@ import numpy as np
 from scipy import stats
 import pandas as pd
 import matplotlib.pyplot as plt
-from datetime import datetime as dt
+import datetime as dt
 import mysql.connector
 import copy
 
@@ -91,7 +91,7 @@ def reform_df(MotionData_ila):
     time_list = MotionData_ila["local_timestamp"].values.tolist()
     for elt in time_list:
         elt = elt[0:19] # trim milli seconds
-        aa = dt.strptime(elt, '%Y-%m-%d %H:%M:%S')
+        aa = dt.datetime.strptime(elt, '%Y-%m-%d %H:%M:%S')
         datetime_list.append(aa)
     MotionData_ila['exact_time'] = time_list         
     
@@ -138,81 +138,121 @@ are_user_same = debugging_two_temp_list_value(user_list_sleep,user_list_sensor)
 ###################################################
 # Match sleep and motion sensor on the dates
 ###################################################
-# For each unit in reformed_mobility_list and reformed_sensor_list, remove the 
-# dates that in reformed_sensor_list but not in reformed_mobility_list
-cleaned_sensor_list = [];deleted_list_for_all_day=[]
-for i in range(len(reformed_sensor_list)):
-    each_PID = reformed_sensor_list[i]
-    each_unit = reformed_mobility_list[i]
+# For each unit in reformed_sensor_list_temp and reformed_sleep_list_temp, remove the 
+# dates that in reformed_sensor_list but not in reformed_sleep_list_temp
+reformed_sensor_list = [];deleted_list_for_all_day=[]
+for i in range(len(reformed_sensor_list_temp)):
+    each_PID_sensor = reformed_sensor_list_temp[i]
+    each_PID_sleep = reformed_sleep_list_temp[i]
     # for the two dataframe, check the time
-    mobility_date = each_unit['local_timestamp'].tolist()
-    sensor_date = each_PID['exact_time'].tolist()
+    sleep_date = each_PID_sleep['start_date'].tolist()
+    sensor_date = each_PID_sensor['exact_time'].tolist()
     # mobility has time format YY-MM-DD but sensor also has hours
     sensor_date = [dt.datetime.strptime(date[0:19], '%Y-%m-%d %H:%M:%S') for date in sensor_date]
-    # sensor hours can be removed
+    
+    # time with hours can be trimmed
     sensor_date_truncated = [each_day.date() for each_day in sensor_date] 
     sensor_date_truncated_distinct = list(set(sensor_date_truncated)) # distinct dates
-    # find the days that in mobility but not in sensor reading
-    date_not_in_mobility = [elem for elem in sensor_date_truncated_distinct if elem not in mobility_date]
+    sleep_date_truncated = [each_start_day.date() for each_start_day in sleep_date] 
+    sleep_date_truncated_distinct = list(set(sleep_date_truncated)) 
+    
+    # find the days that in sleep but not in sensor reading
+    date_not_in_sleep = [elem for elem in sensor_date_truncated_distinct if elem not in sleep_date_truncated_distinct]
     # remove repetitive items in date_not_in_mobility
-    date_notin_mobility = list(set(date_not_in_mobility))
-    date_notin_mobility = sorted(date_notin_mobility)
+    date_not_in_sleep = list(set(date_not_in_sleep))
+    date_notin_sleep = sorted(date_not_in_sleep)
     # transfer the list back to str format
-    aaa = [each_date.__str__() for each_date in date_notin_mobility] 
+    aaa = [each_date.__str__() for each_date in date_notin_sleep] 
 
-    # after the for loop, each_unit in mobility will have all dates in each_PID
-    # just add a for loop to remove each date in aaa(date in sensor but not in mobility)
+    # after the for loop, each_PID_sleep in sleep will have all dates in each_PID_sensor
+    # just add a for loop to remove each date in aaa(date in sensor but not in sleep)
     deleted_list=[]
     for a in aaa:
         # find the sensor readings that should be deleted
-        deleted = each_PID[each_PID['exact_time'].str.contains(a)]
+        deleted = each_PID_sensor[each_PID_sensor['exact_time'].str.contains(a)]
         deleted_list.append(deleted)
         # remove these units from sensor reading dataframe
-        each_PID = pd.concat([each_PID, deleted]).drop_duplicates(keep=False)
+        each_PID_sensor = pd.concat([each_PID_sensor, deleted]).drop_duplicates(keep=False)
 
-    cleaned_sensor_list.append(each_PID)
+    reformed_sensor_list.append(each_PID_sensor)
     deleted_list_for_all_day.append(deleted_list)
     
 #----------------------------------------------------------------------------- 
-# Same, for each unit in reformed_mobility_list and reformed_sensor_list, remove the 
-# dates that in reformed_mobility_list but not in reformed_sensor_list
-cleaned_mobility_list = [];
-for i in range(len(cleaned_sensor_list)):
-    each_PID = cleaned_sensor_list[i]
-    each_unit = reformed_mobility_list[i]
+# Same, for each unit in reformed_sleep_list_temp and reformed_sensor_list_temp,remove the 
+# dates that in reformed_sleep_list_temp but not in reformed_sensor_list_temp
+reformed_sleep_list = [];
+for i in range(len(reformed_sensor_list)):
+    each_PID_sensor = reformed_sensor_list[i]
+    each_PID_sleep = reformed_sleep_list_temp[i]
     # for the two dataframe, check the time
-    mobility_date = each_unit['local_timestamp'].tolist()
-    sensor_date = each_PID['exact_time'].tolist()
+    sleep_date = each_PID_sleep['start_date'].tolist()
+    sensor_date = each_PID_sensor['exact_time'].tolist()
     #  mobility has time format YY-MM-DD but sensor also has hours
     sensor_date = [dt.datetime.strptime(date[0:19], '%Y-%m-%d %H:%M:%S') for date in sensor_date]
     
     # sensor hours can be removed
     sensor_date_truncated = [each_day.date() for each_day in sensor_date] 
     sensor_date_truncated_distinct = list(set(sensor_date_truncated)) # distinct dates
-    
+    sleep_date_truncated = [each_start_day.date() for each_start_day in sleep_date] 
+    sleep_date_truncated_distinct = list(set(sleep_date_truncated)) 
+
     # find the days that in sensor reading but not in mobility
-    date_not_in_sensor = [elem for elem in mobility_date if elem not in sensor_date_truncated_distinct]
+    date_not_in_sensor = [elem for elem in sleep_date_truncated_distinct if elem not in sensor_date_truncated_distinct]
     # remove repetitive items in date_not_in_mobility
     date_notin_sensor = list(set(date_not_in_sensor))
     date_notin_sensor = sorted(date_notin_sensor) # date_notin_sensor is a list with date elements
     
     # remove the mobility dates that should be deleted
-    keeped_mobility_unit = each_unit[~each_unit['local_timestamp'].isin(date_notin_sensor)]
-    cleaned_mobility_list.append(keeped_mobility_unit)
+    keeped_sleep_PID_unit = each_PID_sleep[~each_PID_sleep['start_date'].isin(date_notin_sensor)]
+    reformed_sleep_list.append(keeped_sleep_PID_unit)
 
+#----------------------------------------------------------------------------- 
+# Remove repetitive dates of sleep recording 
+def get_masked_dataframe(start_date, end_date, df):
+    mask = (df['start_date']>= start_date) & (df['start_date'] < end_date)
+    new_df = df.loc[mask]
+    return new_df
+ 
+reformed_sleep_list_with_no_repetitive = [];
+
+for each_user_sleep_df in reformed_sleep_list:
+    cleaned_this_user = pd.DataFrame({}) 
+    sleep_date_list = each_user_sleep_df['start_date'].tolist()
+    slice_windows = pd.date_range(sleep_date_list[0], periods=300, freq='1D').tolist()
+
+    for i in range(len(slice_windows)-1):
+        start_date = slice_windows[i]
+        end_date = slice_windows[i+1]
+        only_user_one_day_df = get_masked_dataframe(start_date, end_date, each_user_sleep_df)
+        # keep the longest sleep duration in record
+        only_user_one_day_df = only_user_one_day_df.fillna(method='ffill')
+        only_user_one_day_cleaned = only_user_one_day_df.sort_values('sleep_duration').drop_duplicates(['PID'], keep='last')
+        cleaned_this_user = pd.concat([cleaned_this_user,only_user_one_day_cleaned])
+    
+    reformed_sleep_list_with_no_repetitive.append(cleaned_this_user)
 
 #############################################################################
-# Mobility (fixed-distance step, distance travelled): ground truth
+# Use random sleep parameter as the length dates
 #############################################################################
 # Ground truth mobility, ignore those who have data less than 29 days
-temp_mobility=[]
-for each_user_mobility in cleaned_mobility_list:
-    aa = each_user_mobility['value'].tolist()
-    temp_mobility.append(aa) 
+def get_temp_sleep_parameter(reformed_sleep_list_with_no_repetitive,sleep_para,coverting_dividor):
+    temp_sleep_duration=[]
+    for each_user_mobility in reformed_sleep_list_with_no_repetitive:
+        aa = each_user_mobility[sleep_para].tolist()
+        aa = [x/coverting_dividor for x in aa] # convert second to hours
+        temp_sleep_duration.append(aa) 
+    return temp_sleep_duration
+
+temp_sleep_duration= get_temp_sleep_parameter(reformed_sleep_list_with_no_repetitive,'sleep_duration',3600)
+temp_sleep_onset_duration= get_temp_sleep_parameter(reformed_sleep_list_with_no_repetitive,'sleep_onset_duration',60)
+temp_sleep_efficiency= get_temp_sleep_parameter(reformed_sleep_list_with_no_repetitive,'sleep_efficiency',1)
+temp_waso= get_temp_sleep_parameter(reformed_sleep_list_with_no_repetitive,'awake_duration',60)
+ 
     
-flat_mobility = [item for sublist in temp_mobility for item in sublist]
-print('flat_mobility = ', len(flat_mobility))
+flat_sleep_duration = [item for sublist in temp_sleep_duration for item in sublist]
+print('flat_sleep_duration = ', len(flat_sleep_duration))
     
+avg_of_sleep_days = np.nanmean(np.asarray(flat_sleep_duration))
 #############################################################################
 # Get the num of room transition
 #############################################################################
@@ -223,7 +263,7 @@ def remove_dup_df(motion_data):
     return drop_dup_df
 #----------------------------------------------------------------------------- 
 sensor_list=[]
-for each_PID in cleaned_sensor_list:
+for each_PID in reformed_sensor_list:
     cleaned_each_df = remove_dup_df(each_PID)
     sensor_list.append(cleaned_each_df)
 
@@ -239,7 +279,7 @@ for each_user in sensor_list:
         max_rooms = len(test_user_room_list)
     if len(test_user_room_list) < min_rooms:
         min_rooms = len(test_user_room_list)
-# now we know max_room=10, min_room=6
+# now we know max_room=10, min_room=5
 
 '''
 If we check each PID dataframe, we will realize that some sensors are removed
@@ -279,12 +319,12 @@ def labels_between_room(cleaned_ila):
     return tempDF
 
 '''
-time span for mobility: 2019/04/26 - 2020/05/26(included) (maximal 376 days in cleaned_mobility_list). 
+time span for motion: 2018/04/26 - 2020/05/26(included) (maximal 376 days in cleaned_mobility_list). 
 Just remove the dates that are not in this range for sensor_list
 '''    
 # Chopped datetime       
-base = dt.datetime.strptime('2019-04-26 00:00:00', '%Y-%m-%d %H:%M:%S')
-datelist = pd.date_range(base, periods=400).tolist()
+base = dt.datetime.strptime('2019-01-01 00:00:00', '%Y-%m-%d %H:%M:%S')
+datelist = pd.date_range(base, periods=600).tolist()
 choppedTime=[]
 for elt in datelist:
     strg = f'{elt:%Y-%m-%d %H:%M:%S}'
@@ -334,70 +374,96 @@ def get_transition_arrays(cleaned_ila,choppedTime):
 
 
 ### LONG COMPUTING TIME!
-temp_transition=[]
+users_transition=[]
 for each_user in finally_sensor_list:
     transition = get_transition_arrays(each_user,choppedTime)
-    temp_transition.append(transition) 
+    users_transition.append(transition) 
 
-flat_transition = [item for sublist in temp_transition for item in sublist]
+flat_transition = [item for sublist in users_transition for item in sublist]
 print('flat_transition = ',  len(flat_transition))
 
-# for debug
-a_temp_transition=[]
-for mob in temp_transition:
-    a_temp_transition.append(len(mob))
-a_temp_mobility=[]
-for trans in temp_mobility:
-    a_temp_mobility.append(len(trans))  
-    
-aaa_indices_mob_trans = debugging_two_temp_list_value(a_temp_transition,a_temp_mobility)
-print('if indices has all TRUE in elements, then bug free')
+#############################################################################
+# Visualization of motion/sleep
+#############################################################################
+user_index=27
 
-plt.figure(figsize=(18,6))
-plt.plot(temp_transition[35])
-plt.title('daily room transition as mobility')
+plt.figure(figsize=(15,15))
+plt.subplot(5,1,1)
+plt.plot(users_transition[user_index][0:60],label = 'mobility',color = 'r')
+plt.legend()
+plt.ylabel("mobility level")
+
+plt.subplot(5,1,2)
+plt.plot(temp_sleep_duration[user_index][0:60],label = 'sleep duration')
+plt.legend()
+plt.ylabel("hours")
+
+plt.subplot(5,1,3)
+plt.plot(temp_sleep_efficiency[user_index][0:60],label = 'sleep efficiency')
+plt.legend()
+plt.ylabel("sleep efficiency")
+
+plt.subplot(5,1,4)
+plt.plot(temp_sleep_onset_duration[user_index][0:60],label = 'sleep onset duration')
+plt.legend()
+plt.ylabel("minutes")
+
+plt.subplot(5,1,5)
+plt.plot(temp_waso[user_index][0:60],label = 'wake after sleep onset')
+plt.legend()
+plt.xlabel("day")
+plt.ylabel("minutes")
 
 #############################################################################
-# DEBUG section
-# If ground truth mobility have 0 in one day, then num of room transition
-# will miss that day, cause its length reduced, so we need to match it with mobility
+# Anova
 #############################################################################
-temp_transition_copied = copy.deepcopy(temp_transition)
+# from users get their ages
+user_gender = pd.read_csv(r'D:\Sensor_Data_Processing\gender_label\survey_labels.csv')
+user_gender = user_gender[user_gender['record_id'].isin(user_list_sleep)]
+time_list = user_gender["date_of_birth"].values.tolist()
+datetime_list = [dt.datetime.strptime(x, '%Y-%m-%d') for x in time_list]
+age_list = [(dt.datetime.today() - birth_date) // dt.timedelta(days=365.2425) for birth_date in datetime_list]
+user_gender['age'] = age_list 
 
-for i in range(len(temp_mobility)):
-    if len(temp_transition[i]) == len(temp_mobility[i]):
-        continue
-    if len(temp_transition[i]) != len(temp_mobility[i]):
-        user_sensor_readings = finally_sensor_list[i]
-        user_mobility = cleaned_mobility_list[i]
-        sensor_date = user_sensor_readings['exact_time'].values.tolist()              
-        user_sensor_date = [dt.datetime.strptime(date[0:19], '%Y-%m-%d %H:%M:%S') for date in sensor_date]
-        user_sensor_date = [each_day.date() for each_day in user_sensor_date] 
-        user_sensor_date_unique = sorted(list(set(user_sensor_date))) # distinct dates
-        user_mobility_date_unique = user_mobility['local_timestamp'].values.tolist()
-        # compare user_sensor_date_unique and user_mobility_date_unique to find the missing items in user_sensor_date_unique
-        missing_days_in_sensor = list(set(user_mobility_date_unique) - set(user_sensor_date_unique))
+# mean for male and female age
+selected_df = user_gender[user_gender['gender']==1]
+selected_df['age'].describe()
 
-        missing_days_in_sensor_index_list = []
-        for each_day in missing_days_in_sensor:
-            missing_days_in_sensor_index = [i for i, x in enumerate(user_mobility_date_unique) if x == each_day]
-            missing_days_in_sensor_index_list.append(missing_days_in_sensor_index)
+# select users: male(3-1,3-175,3-85,3-96); female(3-48,3-58,3-159,3-27)
+import statsmodels.api as sm
+from statsmodels.formula.api import ols
 
-        # add 0 in temp_transition[i] in front of the value
-        for index in missing_days_in_sensor_index_list:
-            temp_transition_copied[i].insert(index[0], 0)
+transition_data_male = [users_transition[0][0:60],users_transition[42][0:60],users_transition[39][0:60]]
+flat_transition_data_male = [item for sublist in transition_data_male for item in sublist]
+transition_data_female = [users_transition[0][0:60],users_transition[42][0:60],users_transition[39][0:60]]
+flat_transition_data_female = [item for sublist in transition_data_female for item in sublist]
+transition_data_male = pd.DataFrame({'label':'male','data':flat_transition_data_male})
+transition_data_female = pd.DataFrame({'label':'female','data':flat_transition_data_female})
+transition_data = transition_data_male.append(transition_data_female)
 
-# for debug
-index=5
-user_sensor_readings = finally_sensor_list[index]
-user_mobility = cleaned_mobility_list[index]
-sensor_date = user_sensor_readings['exact_time'].values.tolist()              
-user_sensor_date = [dt.datetime.strptime(date[0:19], '%Y-%m-%d %H:%M:%S') for date in sensor_date]
-user_sensor_date = [each_day.date() for each_day in user_sensor_date] 
-user_sensor_date_unique = sorted(list(set(user_sensor_date))) # distinct dates
-user_mobility_date_unique = user_mobility['local_timestamp'].values.tolist()
-missing_days_in_sensor = list(set(user_mobility_date_unique) - set(user_sensor_date_unique))
-missing_days_in_sensor_index_list = []
-for each_day in missing_days_in_sensor:
-    missing_days_in_sensor_index = [i for i, x in enumerate(user_mobility_date_unique) if x == each_day]
-    missing_days_in_sensor_index_list.append(missing_days_in_sensor_index)
+linea_model = ols('label ~ data', data = transition_data).fit()
+tabel = sm.stats.anova_lm(linea_model)
+print(tabel)
+
+
+
+
+
+
+
+#############################################################################
+# Anova
+#############################################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
