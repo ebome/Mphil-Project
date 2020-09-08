@@ -4,7 +4,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import datetime as dt
 import mysql.connector
-import copy
 
 
 dacs_all_sleep = pd.read_csv(r"D:\Sensor_Data_Processing\dacs_91_sleep_data.csv")
@@ -135,124 +134,6 @@ def debugging_two_temp_list_value(a1,a2):
 
 are_user_same = debugging_two_temp_list_value(user_list_sleep,user_list_sensor)
 
-###################################################
-# Match sleep and motion sensor on the dates
-###################################################
-# For each unit in reformed_sensor_list_temp and reformed_sleep_list_temp, remove the 
-# dates that in reformed_sensor_list but not in reformed_sleep_list_temp
-reformed_sensor_list = [];deleted_list_for_all_day=[]
-for i in range(len(reformed_sensor_list_temp)):
-    each_PID_sensor = reformed_sensor_list_temp[i]
-    each_PID_sleep = reformed_sleep_list_temp[i]
-    # for the two dataframe, check the time
-    sleep_date = each_PID_sleep['start_date'].tolist()
-    sensor_date = each_PID_sensor['exact_time'].tolist()
-    # mobility has time format YY-MM-DD but sensor also has hours
-    sensor_date = [dt.datetime.strptime(date[0:19], '%Y-%m-%d %H:%M:%S') for date in sensor_date]
-    
-    # time with hours can be trimmed
-    sensor_date_truncated = [each_day.date() for each_day in sensor_date] 
-    sensor_date_truncated_distinct = list(set(sensor_date_truncated)) # distinct dates
-    sleep_date_truncated = [each_start_day.date() for each_start_day in sleep_date] 
-    sleep_date_truncated_distinct = list(set(sleep_date_truncated)) 
-    
-    # find the days that in sleep but not in sensor reading
-    date_not_in_sleep = [elem for elem in sensor_date_truncated_distinct if elem not in sleep_date_truncated_distinct]
-    # remove repetitive items in date_not_in_mobility
-    date_not_in_sleep = list(set(date_not_in_sleep))
-    date_notin_sleep = sorted(date_not_in_sleep)
-    # transfer the list back to str format
-    aaa = [each_date.__str__() for each_date in date_notin_sleep] 
-
-    # after the for loop, each_PID_sleep in sleep will have all dates in each_PID_sensor
-    # just add a for loop to remove each date in aaa(date in sensor but not in sleep)
-    deleted_list=[]
-    for a in aaa:
-        # find the sensor readings that should be deleted
-        deleted = each_PID_sensor[each_PID_sensor['exact_time'].str.contains(a)]
-        deleted_list.append(deleted)
-        # remove these units from sensor reading dataframe
-        each_PID_sensor = pd.concat([each_PID_sensor, deleted]).drop_duplicates(keep=False)
-
-    reformed_sensor_list.append(each_PID_sensor)
-    deleted_list_for_all_day.append(deleted_list)
-    
-#----------------------------------------------------------------------------- 
-# Same, for each unit in reformed_sleep_list_temp and reformed_sensor_list_temp,remove the 
-# dates that in reformed_sleep_list_temp but not in reformed_sensor_list_temp
-reformed_sleep_list = [];
-for i in range(len(reformed_sensor_list)):
-    each_PID_sensor = reformed_sensor_list[i]
-    each_PID_sleep = reformed_sleep_list_temp[i]
-    # for the two dataframe, check the time
-    sleep_date = each_PID_sleep['start_date'].tolist()
-    sensor_date = each_PID_sensor['exact_time'].tolist()
-    #  mobility has time format YY-MM-DD but sensor also has hours
-    sensor_date = [dt.datetime.strptime(date[0:19], '%Y-%m-%d %H:%M:%S') for date in sensor_date]
-    
-    # sensor hours can be removed
-    sensor_date_truncated = [each_day.date() for each_day in sensor_date] 
-    sensor_date_truncated_distinct = list(set(sensor_date_truncated)) # distinct dates
-    sleep_date_truncated = [each_start_day.date() for each_start_day in sleep_date] 
-    sleep_date_truncated_distinct = list(set(sleep_date_truncated)) 
-
-    # find the days that in sensor reading but not in mobility
-    date_not_in_sensor = [elem for elem in sleep_date_truncated_distinct if elem not in sensor_date_truncated_distinct]
-    # remove repetitive items in date_not_in_mobility
-    date_notin_sensor = list(set(date_not_in_sensor))
-    date_notin_sensor = sorted(date_notin_sensor) # date_notin_sensor is a list with date elements
-    
-    # remove the mobility dates that should be deleted
-    keeped_sleep_PID_unit = each_PID_sleep[~each_PID_sleep['start_date'].isin(date_notin_sensor)]
-    reformed_sleep_list.append(keeped_sleep_PID_unit)
-
-#----------------------------------------------------------------------------- 
-# Remove repetitive dates of sleep recording 
-def get_masked_dataframe(start_date, end_date, df):
-    mask = (df['start_date']>= start_date) & (df['start_date'] < end_date)
-    new_df = df.loc[mask]
-    return new_df
- 
-reformed_sleep_list_with_no_repetitive = [];
-
-for each_user_sleep_df in reformed_sleep_list:
-    cleaned_this_user = pd.DataFrame({}) 
-    sleep_date_list = each_user_sleep_df['start_date'].tolist()
-    slice_windows = pd.date_range(sleep_date_list[0], periods=300, freq='1D').tolist()
-
-    for i in range(len(slice_windows)-1):
-        start_date = slice_windows[i]
-        end_date = slice_windows[i+1]
-        only_user_one_day_df = get_masked_dataframe(start_date, end_date, each_user_sleep_df)
-        # keep the longest sleep duration in record
-        only_user_one_day_df = only_user_one_day_df.fillna(method='ffill')
-        only_user_one_day_cleaned = only_user_one_day_df.sort_values('sleep_duration').drop_duplicates(['PID'], keep='last')
-        cleaned_this_user = pd.concat([cleaned_this_user,only_user_one_day_cleaned])
-    
-    reformed_sleep_list_with_no_repetitive.append(cleaned_this_user)
-
-#############################################################################
-# Use random sleep parameter as the length dates
-#############################################################################
-# Ground truth mobility, ignore those who have data less than 29 days
-def get_temp_sleep_parameter(reformed_sleep_list_with_no_repetitive,sleep_para,coverting_dividor):
-    temp_sleep_duration=[]
-    for each_user_mobility in reformed_sleep_list_with_no_repetitive:
-        aa = each_user_mobility[sleep_para].tolist()
-        aa = [x/coverting_dividor for x in aa] # convert second to hours
-        temp_sleep_duration.append(aa) 
-    return temp_sleep_duration
-
-temp_sleep_duration= get_temp_sleep_parameter(reformed_sleep_list_with_no_repetitive,'sleep_duration',3600)
-temp_sleep_onset_duration= get_temp_sleep_parameter(reformed_sleep_list_with_no_repetitive,'sleep_onset_duration',60)
-temp_sleep_efficiency= get_temp_sleep_parameter(reformed_sleep_list_with_no_repetitive,'sleep_efficiency',1)
-temp_waso= get_temp_sleep_parameter(reformed_sleep_list_with_no_repetitive,'awake_duration',60)
- 
-    
-flat_sleep_duration = [item for sublist in temp_sleep_duration for item in sublist]
-print('flat_sleep_duration = ', len(flat_sleep_duration))
-    
-avg_of_sleep_days = np.nanmean(np.asarray(flat_sleep_duration))
 #############################################################################
 # Get the num of room transition
 #############################################################################
@@ -263,7 +144,7 @@ def remove_dup_df(motion_data):
     return drop_dup_df
 #----------------------------------------------------------------------------- 
 sensor_list=[]
-for each_PID in reformed_sensor_list:
+for each_PID in reformed_sensor_list_temp:
     cleaned_each_df = remove_dup_df(each_PID)
     sensor_list.append(cleaned_each_df)
 
@@ -337,7 +218,7 @@ def get_transition_arrays(cleaned_ila,choppedTime):
     # count how many rooms in this user's house
     room_num = len(cleaned_ila['changed_sensor_id'].unique().tolist())
     # print(room_num)
-    transition=[]
+    transition=[]; date_list=[]
     
     first_date_in_cleaned_ila = cleaned_ila['local_timestamp'].tolist()[0]
     last_date_in_cleaned_ila = cleaned_ila['local_timestamp'].tolist()[-1]
@@ -349,7 +230,7 @@ def get_transition_arrays(cleaned_ila,choppedTime):
         # choppedTime start  4-26, hence the choppedila_day is length 0 before the start date
         if first_date_in_cleaned_ila > choppedTime[i+1] or last_date_in_cleaned_ila < choppedTime[i]:
             continue
-        # after the first date, if there is no sensor record in that day, mark the step as 1
+        # if there is one day missing, just let it go
         if len(choppedila_day)==0:
             continue
         
@@ -367,20 +248,119 @@ def get_transition_arrays(cleaned_ila,choppedTime):
             merge_labelled_ilaList = ms.merge_9_sensors(ila_lablled)
         if room_num == 10:
             merge_labelled_ilaList = ms.merge_10_sensors(ila_lablled)
-
         transition.append(len(merge_labelled_ilaList))
+        
+        date_of_computed = choppedila_day['local_timestamp'].tolist()[0][0:10]
+        sensor_date = dt.datetime.strptime(date_of_computed, '%Y-%m-%d')
+        date_list.append(sensor_date)
+        
+        num_of_transition = pd.DataFrame({'date':date_list, 'num_of_transition':transition})
     
-    return transition
+    return num_of_transition
 
 
 ### LONG COMPUTING TIME!
 users_transition=[]
 for each_user in finally_sensor_list:
-    transition = get_transition_arrays(each_user,choppedTime)
-    users_transition.append(transition) 
+    single_user_transition = get_transition_arrays(each_user,choppedTime)
+    users_transition.append(single_user_transition) 
 
-flat_transition = [item for sublist in users_transition for item in sublist]
-print('flat_transition = ',  len(flat_transition))
+#flat_transition = [item for sublist in users_transition for item in sublist]
+#print('flat_transition = ',  len(flat_transition))
+
+#############################################################################
+# Remove repetitive dates of sleep recording 
+#############################################################################
+def get_masked_dataframe(start_date, end_date, df):
+    mask = (df['start_date']>= start_date) & (df['start_date'] < end_date)
+    new_df = df.loc[mask]
+    return new_df
+ 
+
+reformed_sleep_list_with_no_repetitive = [];
+for each_user_sleep_df in reformed_sleep_list_temp:
+    cleaned_this_user = pd.DataFrame({}) 
+    sleep_date_list = each_user_sleep_df['start_date'].tolist()
+    slice_windows = pd.date_range(sleep_date_list[0], periods=500, freq='1D').tolist()
+    for i in range(len(slice_windows)-1):
+        start_date = slice_windows[i]
+        end_date = slice_windows[i+1]
+        only_user_one_day_df = get_masked_dataframe(start_date, end_date, each_user_sleep_df)
+        if only_user_one_day_df.empty == False:
+            # keep the longest sleep duration in record
+            only_user_one_day_df = only_user_one_day_df.fillna(method='ffill')
+            only_user_one_day_cleaned = only_user_one_day_df.sort_values('sleep_duration').drop_duplicates(['PID'], keep='last')
+            cleaned_this_user = pd.concat([cleaned_this_user,only_user_one_day_cleaned])
+    reformed_sleep_list_with_no_repetitive.append(cleaned_this_user)
+
+# There will be reocrds in same day indicate daytime nap, 
+# so if start and end day are same, and remove
+reformed_sleep_list_no_nap = []
+for each_user_sleep in reformed_sleep_list_with_no_repetitive:
+    removed_sleep_days = pd.DataFrame({})
+    start_dates = [each_day.date() for each_day in each_user_sleep['start_date'].tolist()] 
+    end_dates = [each_day.date() for each_day in each_user_sleep['end_date'].tolist()] 
+    start_hours = [each_day.time() for each_day in each_user_sleep['start_date'].tolist()] 
+    sleep_duration = [each_duration/3600 for each_duration in each_user_sleep['sleep_duration'].tolist()]
+    nap_time_ends = dt.time(17,0,0);    nap_time_starts = dt.time(7,0,0)
+
+    index_list = each_user_sleep.index.tolist()
+    
+    for i in range(len(start_dates)):
+        if start_dates[i]==end_dates[i] and sleep_duration[i] < 3 :
+            index = index_list[i]
+            removed = each_user_sleep.loc[index]
+            removed_sleep_days = removed_sleep_days.append(removed)
+    
+    each_user_sleep = each_user_sleep[~each_user_sleep.isin(removed_sleep_days)].dropna()    
+    reformed_sleep_list_no_nap.append(each_user_sleep)     
+    
+    
+###################################################
+# Match sleep and motion sensor on the dates
+###################################################
+# Same, for each unit in reformed_sleep_list_with_no_repetitive and users_transition,remove the 
+# dates that in reformed_sleep_list_with_no_repetitive but not in users_transition
+reformed_sleep_list = [];reformed_sensor_list = []
+for i in range(len(users_transition)):
+    # add the day as index of mobility
+    each_PID_mobility = users_transition[i]
+    each_PID_mobility['start_day_trucated'] = [each_day.date() for each_day in each_PID_mobility['date'].tolist()] 
+    # add the day as index of sleep, change the consecutive cells with reptitive day
+    each_PID_sleep = reformed_sleep_list_no_nap[i]
+    each_PID_sleep['start_day_trucated'] = [each_day.date() for each_day in each_PID_sleep['start_date'].tolist()] 
+
+    # match the days
+    each_PID_mobility_reformed = each_PID_mobility[each_PID_mobility['start_day_trucated'].isin(each_PID_sleep['start_day_trucated'])]
+    each_PID_sleep_reformed = each_PID_sleep[each_PID_sleep['start_day_trucated'].isin(each_PID_mobility_reformed['start_day_trucated'])]
+    
+    reformed_sensor_list.append(each_PID_mobility_reformed)
+    reformed_sleep_list.append(each_PID_sleep_reformed)
+
+#############################################################################
+# Sleep parameter selection
+#############################################################################
+# Ground truth mobility, ignore those who have data less than 29 days
+def get_temp_sleep_parameter(reformed_sleep_list_with_no_repetitive,sleep_para,coverting_dividor):
+    temp_sleep_duration=[]
+    for each_user_mobility in reformed_sleep_list_with_no_repetitive:
+        aa = each_user_mobility[sleep_para].tolist()
+        aa = [x/coverting_dividor for x in aa] # convert second to hours
+        temp_sleep_duration.append(aa) 
+    return temp_sleep_duration
+
+temp_sleep_duration= get_temp_sleep_parameter(reformed_sleep_list,'sleep_duration',3600)
+temp_sleep_onset_duration= get_temp_sleep_parameter(reformed_sleep_list,'sleep_onset_duration',60)
+temp_sleep_efficiency= get_temp_sleep_parameter(reformed_sleep_list,'sleep_efficiency',1)
+temp_waso= get_temp_sleep_parameter(reformed_sleep_list,'awake_duration',60)
+ 
+    
+flat_sleep_duration = [item for sublist in temp_sleep_duration for item in sublist]
+print('flat_sleep_duration = ', len(flat_sleep_duration))
+    
+avg_of_sleep_days = np.nanmean(np.asarray(flat_sleep_duration))
+
+
 
 #############################################################################
 # Visualization of motion/sleep
@@ -415,7 +395,7 @@ plt.xlabel("day")
 plt.ylabel("minutes")
 
 #############################################################################
-# Anova
+# Anova and t test
 #############################################################################
 # from users get their ages
 user_gender = pd.read_csv(r'D:\Sensor_Data_Processing\gender_label\survey_labels.csv')
@@ -424,46 +404,173 @@ time_list = user_gender["date_of_birth"].values.tolist()
 datetime_list = [dt.datetime.strptime(x, '%Y-%m-%d') for x in time_list]
 age_list = [(dt.datetime.today() - birth_date) // dt.timedelta(days=365.2425) for birth_date in datetime_list]
 user_gender['age'] = age_list 
+user_gender = user_gender.sort_values(by=['record_id']).reset_index()
+# add mental score to user_gender
+user_mental_score = pd.read_csv(r'D:\Sensor_Data_Processing\gender_label\eq5d_and_mood_and_mental_scores.csv')
+user_mental_score = user_mental_score[user_mental_score['PID'].isin(user_gender['record_id'].tolist())]
+user_gender['mental_score'] = [int(x) for x in user_mental_score['ATSM'].tolist()]
+
+# removed users that has mental score < 5
+user_gender = user_gender[user_gender['mental_score']>=7]
+
+
+# For paper
+user_paper= pd.read_csv(r'D:\Sensor_Data_Processing\dasc individual correlation coefficients data up to 2020 May.csv')
+user_gender_paper = user_gender[user_gender['record_id'].isin(user_paper['User'])]
+user_gender_paper = user_gender_paper.merge(user_paper, left_on='record_id', right_on='User', how = 'inner')
+time_list = user_gender_paper["date_of_birth"].values.tolist()
+datetime_list = [dt.datetime.strptime(x, '%Y-%m-%d') for x in time_list]
+age_list = [(dt.datetime.today() - birth_date) // dt.timedelta(days=365.2425) for birth_date in datetime_list]
+user_gender_paper['age'] = age_list 
+user_gender_paper = user_gender_paper.sort_values(by=['record_id']).reset_index()
+user_mental_score = pd.read_csv(r'D:\Sensor_Data_Processing\gender_label\eq5d_and_mood_and_mental_scores.csv')
+user_mental_score_paper = user_mental_score[user_mental_score['PID'].isin(user_gender_paper['record_id'].tolist())]
+user_gender_paper['mental_score'] = [int(x) for x in user_mental_score_paper['ATSM'].tolist()]
+
+user_female_paper = user_gender_paper[user_gender_paper['home_care_package_level']==6]
+user_female_paper['home_care_package_level'].describe()
 
 # mean for male and female age
-selected_df = user_gender[user_gender['gender']==1]
-selected_df['age'].describe()
+selected_df_male = user_gender[user_gender['gender']==1]
+selected_df_female = user_gender[user_gender['gender']==2]
+selected_df_70s = user_gender.loc[(user_gender['age']>=70) & (user_gender['age']<80)]
+selected_df_80s = user_gender.loc[(user_gender['age']>=80) & (user_gender['age']<90)]
+selected_df_90s = user_gender.loc[(user_gender['age']>=90) & (user_gender['age']<100)]
 
-# select users: male(3-1,3-175,3-85,3-96); female(3-48,3-58,3-159,3-27)
+selected_df_male['age'].describe()
+
+# ---------------------------------------------------
+# split group
+# from user_gender, get the index of male and female
+def merge_data_mobility(selected_df,reformed_sensor_list):
+   mobility_data=[]
+   for i in selected_df.index.tolist():
+       mobility_data.append(reformed_sensor_list[i]['num_of_transition'].values.tolist())
+   return mobility_data
+
+def merge_data_sleep_para(selected_df,sleep_para):
+   sleep_para_data=[]
+   for i in selected_df.index.tolist():
+       sleep_para_data.append(sleep_para[i])
+   return sleep_para_data
+
+mobility_data_male = merge_data_mobility(selected_df_male,reformed_sensor_list)
+sleep_tst_male = merge_data_sleep_para(selected_df_male,temp_sleep_duration)
+sleep_sol_male = merge_data_sleep_para(selected_df_male,temp_sleep_onset_duration)
+sleep_effi_male = merge_data_sleep_para(selected_df_male,temp_sleep_efficiency)
+sleep_waso_male = merge_data_sleep_para(selected_df_male,temp_waso)
+mobility_data_female = merge_data_mobility(selected_df_female,reformed_sensor_list)
+sleep_tst_female = merge_data_sleep_para(selected_df_female,temp_sleep_duration)
+sleep_sol_female = merge_data_sleep_para(selected_df_female,temp_sleep_onset_duration)
+sleep_effi_female = merge_data_sleep_para(selected_df_female,temp_sleep_efficiency)
+sleep_waso_female = merge_data_sleep_para(selected_df_female,temp_waso)
+
+mobility_data_70s = merge_data_mobility(selected_df_70s,reformed_sensor_list)
+sleep_tst_70s = merge_data_sleep_para(selected_df_70s,temp_sleep_duration)
+sleep_sol_70s = merge_data_sleep_para(selected_df_70s,temp_sleep_onset_duration)
+sleep_effi_70s = merge_data_sleep_para(selected_df_70s,temp_sleep_efficiency)
+sleep_waso_70s = merge_data_sleep_para(selected_df_70s,temp_waso)
+                 
+mobility_data_80s = merge_data_mobility(selected_df_80s,reformed_sensor_list)
+sleep_tst_80s = merge_data_sleep_para(selected_df_80s,temp_sleep_duration)
+sleep_sol_80s = merge_data_sleep_para(selected_df_80s,temp_sleep_onset_duration)
+sleep_effi_80s = merge_data_sleep_para(selected_df_80s,temp_sleep_efficiency)
+sleep_waso_80s = merge_data_sleep_para(selected_df_80s,temp_waso)
+
+mobility_data_90s = merge_data_mobility(selected_df_90s,reformed_sensor_list)
+sleep_tst_90s = merge_data_sleep_para(selected_df_90s,temp_sleep_duration)
+sleep_sol_90s = merge_data_sleep_para(selected_df_90s,temp_sleep_onset_duration)
+sleep_effi_90s = merge_data_sleep_para(selected_df_90s,temp_sleep_efficiency)
+sleep_waso_90s = merge_data_sleep_para(selected_df_90s,temp_waso)
+
+#############################################################################
+# get hist plots and independent t test
+#############################################################################
+# male and female distributions
+kwargs = dict(alpha=0.5, bins=100)
+plt.hist([item for sublist in sleep_effi_male for item in sublist],**kwargs, color='y', label='male SE')
+plt.hist([item for sublist in sleep_effi_female for item in sublist],**kwargs, color='b', label='female SE')
+plt.legend()
+
+def two_group_ttest(group_a, group_b):
+    a = [item for sublist in group_a for item in sublist]
+    b = [item for sublist in group_b for item in sublist]
+    ttest,pval = stats.ttest_ind(a,b)
+    return ttest,pval
+    
+ttest,pval = two_group_ttest(sleep_effi_male, sleep_effi_female)
+print(ttest,pval)
+
+def get_mean_and_std(group_a):
+    a = np.asarray([item for sublist in group_a for item in sublist])
+    avg = a.mean()
+    std = a.std()
+    return avg,std
+
+avg,std = get_mean_and_std(mobility_data_female)
+avg,std = get_mean_and_std(sleep_tst_female)
+avg,std = get_mean_and_std(sleep_sol_female)
+avg,std = get_mean_and_std(sleep_waso_female)
+avg,std = get_mean_and_std(sleep_effi_female)
+print(avg,std)
+
+avg0,std0 = get_mean_and_std(mobility_data_70s)
+print(avg0,std0)
+avg1,std1 = get_mean_and_std(sleep_tst_70s)
+print(avg1,std1)
+avg2,std2 = get_mean_and_std(sleep_sol_70s)
+print(avg2,std2)
+avg3,std3 = get_mean_and_std(sleep_waso_70s)
+print(avg3,std3)
+avg4,std4 = get_mean_and_std(sleep_effi_70s)
+print(avg4,std4)
+
+#############################################################################
+# get hist plots and one way ANOVA
+#############################################################################
+plt.hist([item for sublist in sleep_effi_70s for item in sublist],**kwargs, color='r', label='70s')
+plt.hist([item for sublist in sleep_effi_80s for item in sublist],**kwargs, color='b', label='80s')
+plt.hist([item for sublist in sleep_effi_90s for item in sublist],**kwargs, color='g', label='90s')
+plt.legend()
+plt.title('SE in age groups')
+
 import statsmodels.api as sm
 from statsmodels.formula.api import ols
+from statsmodels.stats.anova import anova_lm
 
-transition_data_male = [users_transition[0][0:60],users_transition[42][0:60],users_transition[39][0:60]]
-flat_transition_data_male = [item for sublist in transition_data_male for item in sublist]
-transition_data_female = [users_transition[0][0:60],users_transition[42][0:60],users_transition[39][0:60]]
-flat_transition_data_female = [item for sublist in transition_data_female for item in sublist]
-transition_data_male = pd.DataFrame({'label':'male','data':flat_transition_data_male})
-transition_data_female = pd.DataFrame({'label':'female','data':flat_transition_data_female})
-transition_data = transition_data_male.append(transition_data_female)
+def get_df_for_three_group(group_a,group_b,group_c):
+    a = [item for sublist in group_a for item in sublist]
+    b = [item for sublist in group_b for item in sublist]
+    c = [item for sublist in group_c for item in sublist]
+    data_a = pd.DataFrame({'age_group':'70s','para_value':a})
+    data_b = pd.DataFrame({'age_group':'80s','para_value':b})
+    data_c = pd.DataFrame({'age_group':'90s','para_value':c})
+    data = data_a.append(data_b, ignore_index=True)
+    data = data.append(data_c, ignore_index=True)
+    return data
 
-linea_model = ols('label ~ data', data = transition_data).fit()
-tabel = sm.stats.anova_lm(linea_model)
-print(tabel)
-
-
-
-
-
-
-
-#############################################################################
-# Anova
-#############################################################################
+mobility_data_all_age = get_df_for_three_group(mobility_data_70s,mobility_data_80s,mobility_data_90s)
+sleep_tst_data_all_age = get_df_for_three_group(sleep_tst_70s,sleep_tst_80s,sleep_tst_90s)
+sleep_sol_data_all_age = get_df_for_three_group(sleep_sol_70s,sleep_sol_80s,sleep_sol_90s)
+sleep_waso_data_all_age = get_df_for_three_group(sleep_waso_70s,sleep_waso_80s,sleep_waso_90s)
+sleep_effi_data_all_age = get_df_for_three_group(sleep_effi_70s,sleep_effi_80s,sleep_effi_90s)
 
 
+#=================================================
+data = sleep_effi_data_all_age
+linea_model = ols('para_value ~ age_group', data = data).fit()
+anovat = anova_lm(linea_model)
+print(anovat)
 
-
-
-
-
-
-
-
-
+# another way to do one way ANOVA
+f, p = stats.f_oneway(data[data['age_group'] == '70s'].para_value,
+                      data[data['age_group'] == '80s'].para_value,
+                      data[data['age_group'] == '90s'].para_value)
+ 
+print ('One-way ANOVA')
+print ('=============')
+ 
+print ('F value:', f)
+print ('P value:', p, '\n')
 
 
