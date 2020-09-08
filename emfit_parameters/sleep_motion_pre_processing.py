@@ -276,7 +276,6 @@ def get_masked_dataframe(start_date, end_date, df):
     new_df = df.loc[mask]
     return new_df
  
-
 reformed_sleep_list_with_no_repetitive = [];
 for each_user_sleep_df in reformed_sleep_list_temp:
     cleaned_this_user = pd.DataFrame({}) 
@@ -314,6 +313,24 @@ for each_user_sleep in reformed_sleep_list_with_no_repetitive:
     
     each_user_sleep = each_user_sleep[~each_user_sleep.isin(removed_sleep_days)].dropna()    
     reformed_sleep_list_no_nap.append(each_user_sleep)     
+
+
+
+
+
+reformed_sleep_list_no_repetitive=[]    
+for each_user_sleep in reformed_sleep_list_no_nap:
+    start_dates = [each_day.date() for each_day in each_user_sleep['start_date'].tolist()] 
+    for i in range(len(start_dates)-1):
+        if start_dates[i] == start_dates[i+1] and\
+        (start_dates[i] - timedelta(days=1)) != start_dates[i-1]:
+            start_dates[i] = start_dates[i] - timedelta(days=1)
+        if start_dates[i] == start_dates[i+1] and\
+        (start_dates[i+1] + timedelta(days=1)) != start_dates[i+2]:
+            start_dates[i+1] = start_dates[i+2] - timedelta(days=1)
+    
+    each_user_sleep['date_for_this_sleep'] = start_dates
+    reformed_sleep_list_no_repetitive.append(each_user_sleep)   
     
     
 ###################################################
