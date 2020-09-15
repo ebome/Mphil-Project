@@ -764,7 +764,6 @@ excel_file = r'D:\DACS\image_table_type.xlsx'
 sheet_name = 'Sheet1'
 writer = pd.ExcelWriter(excel_file, engine='xlsxwriter')
 spearman_result.to_excel(writer, sheet_name=sheet_name)
-
 # Access the XlsxWriter workbook and worksheet objects from the dataframe.
 # This is equivalent to the following using XlsxWriter on its own:
 #
@@ -786,6 +785,18 @@ worksheet.conditional_format('G2:G48', {'type': '2_color_scale','min_color': '#C
 worksheet.conditional_format('H2:H48', {'type': '2_color_scale', 'min_color': '#c7f2da','max_color': '#54d68f'})
 writer.save()
 
+
+plt.figure(figsize=(7,17))
+plt.scatter(spearman_result['Rho1 mobility and transition'],spearman_result.index,label='travelled room distance & room transitions')
+plt.scatter(spearman_result['Rho2 mobility and fixed-speed'],spearman_result.index,label='travelled room distance & fixed-speed mobility')
+plt.scatter(spearman_result['Rho3 mobility and total_firing'],spearman_result.index,label='travelled room distance & total sensor firings')
+plt.grid(axis='both',alpha=0.3)
+plt.xlim([0.6,1])
+plt.legend(loc='upper left',shadow=True,prop={'family':'Times New Roman', 'size':11})
+plt.xlabel('Spearman Correlation Coefficient',fontsize=20, family = 'Times New Roman')
+plt.ylabel('Participants',fontsize=30,family = 'Times New Roman')
+plt.xticks(fontsize=15, family='Times New Roman')
+plt.yticks(fontsize=13, family='Times New Roman')
 
 
 
