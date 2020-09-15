@@ -546,7 +546,7 @@ data_dict = dict(zip(df['label'].tolist(), df['median time(s)'].tolist()))
 def get_daily_sensor_derived_steps(avg_and_median_time_diff_for_labels, single_user_transion_time_diff_with_date):
     step_speed = 1.57 # value with unit: steps/second
     df = avg_and_median_time_diff_for_labels.copy(deep=True)
-    data_dict = dict(zip(df['label'].tolist(), df['median time(s)'].tolist()))
+    data_dict = dict(zip(df['label'].tolist(), df['avg time(s)'].tolist()))
 
     # find every day room transition time avg/mediian sum 
     all_day_transition_labels = single_user_transion_time_diff_with_date['transition label'].tolist()
@@ -580,6 +580,7 @@ for fix_speed_mob in temp_sensor_derived_steps:
     a_temp_sensor_derived_steps.append(len(fix_speed_mob))    
 aaa_indices_mob_fixspeed = debugging_two_temp_list_value(a_temp_sensor_derived_steps,a_temp_mobility)
 print('if indices has all TRUE in elements, then bug free')
+
 
 #############################################################################
 # If ground truth mobility have 0 in one day, then sensor_derived step
@@ -638,8 +639,33 @@ flat_sensor_derived_steps = [item for sublist in temp_sensor_derived_steps for i
 flat_transition = [item for sublist in temp_transition for item in sublist]
 flat_total_firing = [item for sublist in temp_total_triggering for item in sublist]
 
-result3 = bootstrap(flat_mobility, 1000, 0.95, average)
+result3 = bootstrap(flat_total_firing, 1000, 0.95, average)
 print(result3)
+
+# view each parameter distribution
+kwargs = dict(alpha=0.7, bins=10)
+plt.figure(figsize =(18,5))
+plt.subplot(1,3,1)
+plt.xlabel('Fixed-speed Mobility',fontsize=20, family = 'Times New Roman')
+plt.ylabel('Frequency',fontsize=20,family = 'Times New Roman')
+plt.xticks(fontsize=15, family='Times New Roman')
+plt.yticks(fontsize=15, family='Times New Roman')
+plt.hist(flat_sensor_derived_steps,**kwargs) # [a-b for a,b in zip(rho_list3,rho_list1)]
+
+plt.subplot(1,3,2)
+plt.xlabel('Number of Room Transition',fontsize=20, family = 'Times New Roman')
+plt.ylabel('Frequency',fontsize=20,family = 'Times New Roman')
+plt.xticks(fontsize=15, family='Times New Roman')
+plt.yticks(fontsize=15, family='Times New Roman')
+plt.hist(flat_transition,**kwargs)
+
+plt.subplot(1,3,3)
+plt.xlabel('Total Sensor Firing',fontsize=20, family = 'Times New Roman')
+plt.ylabel('Frequency',fontsize=20,family = 'Times New Roman')
+plt.xticks(fontsize=15, family='Times New Roman')
+plt.yticks(fontsize=15, family='Times New Roman')
+plt.hist(flat_total_firing,**kwargs)
+
 
 #############################################################################
 # Linear Regression on each of the individual
@@ -656,19 +682,25 @@ r_sq_list3=[];intercept_list3=[];coef_list3=[]
 for i in range(len(temp_sensor_derived_steps)):
     each_drived_step = temp_sensor_derived_steps[i]
     each_mobility = temp_mobility[i]
+    each_total_trigger = temp_total_triggering[i]
     each_transition = temp_transition[i]
     
     x = np.array(each_mobility).reshape((-1, 1))
-    y = np.array(each_drived_step)
-    t = np.array(each_mobility).reshape((-1, 1))
-    z = np.array(each_transition)
+    y = np.array(each_transition)
+    z = np.array(each_total_trigger)
+    t = np.array(each_drived_step)
+
 
     model1 = LinearRegression()
     model1.fit(x, y)
     r_sq1 = model1.score(x, y)
     model2 = LinearRegression()
-    model2.fit(t, z)
-    r_sq2 = model2.score(t, z)
+    model2.fit(x, z)
+    r_sq2 = model2.score(x, z)
+    model3 = LinearRegression()
+    model3.fit(x, t)
+    r_sq3 = model3.score(x, t)
+
 
     r_sq_list1.append(r_sq1)
     intercept_list1.append(model1.intercept_)
@@ -676,11 +708,18 @@ for i in range(len(temp_sensor_derived_steps)):
     r_sq_list2.append(r_sq2)
     intercept_list2.append(model2.intercept_)
     coef_list2.append(model2.coef_)
+    r_sq_list3.append(r_sq3)
+    intercept_list3.append(model3.intercept_)
+    coef_list3.append(model3.coef_)
+
 
 least_square_result = pd.DataFrame({'User':user_list_mob,'a0':intercept_list1,
                                'a1':coef_list1,'R^2 1':r_sq_list1,
                                'b0':intercept_list2,
-                               'b1':coef_list2,'R^2 2':r_sq_list2})
+                               'b1':coef_list2,'R^2 2':r_sq_list2,
+                               'c0':intercept_list3,
+                               'c1':coef_list3,'R^2 3':r_sq_list3})
+
     
 least_square_result.to_csv(r'D:\DACS\Individual Participant-linear regression.csv')    
 # count number of R^2 
@@ -706,12 +745,50 @@ for i in range(len(temp_sensor_derived_steps)):
     rho_list3.append(each_user_rho3);p_val3.append(each_user_p_val3)
     valid_day.append(len(each_mobility))
 
-spearman_result = pd.DataFrame({'User':user_list_mob,'Valid days':valid_day,
+user_list_mob_added = ['resident '+user for user in user_list_mob]
+
+rho_list1= [float("{:.3f}".format(each_rho)) for each_rho in rho_list1]
+rho_list2= [float("{:.3f}".format(each_rho)) for each_rho in rho_list2]
+rho_list3= [float("{:.3f}".format(each_rho)) for each_rho in rho_list3]
+
+spearman_result = pd.DataFrame({'User':user_list_mob_added,'Valid days':valid_day,
                                 'Rho1 mobility and transition':rho_list1,'p-val 1':p_val1,
                                 'Rho2 mobility and fixed-speed':rho_list2,'p-val 2':p_val2,
                                 'Rho3 mobility and total_firing':rho_list3,'p-val 3':p_val3})
 
-spearman_result.to_csv(r'D:\DACS\dasc individual correlation coefficients data up to 2020 May.csv')     
+spearman_result.to_excel(r'D:\DACS\dasc individual correlation coefficients data up to 2020 May.xlsx')     
+spearman_result = spearman_result.set_index('User')
+
+# Create a Pandas Excel writer using XlsxWriter as the engine.
+excel_file = r'D:\DACS\image_table_type.xlsx'
+sheet_name = 'Sheet1'
+writer = pd.ExcelWriter(excel_file, engine='xlsxwriter')
+spearman_result.to_excel(writer, sheet_name=sheet_name)
+
+# Access the XlsxWriter workbook and worksheet objects from the dataframe.
+# This is equivalent to the following using XlsxWriter on its own:
+#
+#    workbook = xlsxwriter.Workbook('filename.xlsx')
+#    worksheet = workbook.add_worksheet()
+#
+workbook = writer.book
+worksheet = writer.sheets[sheet_name]
+
+# Apply a conditional format to the cell range.
+worksheet.conditional_format('B2:B48', {'type': '3_color_scale'})
+worksheet.conditional_format('C2:C48', {'type': '2_color_scale',
+                                         'min_color': '#C5D9F1', # light color
+                                         'max_color': '#538ED5'})
+worksheet.conditional_format('D2:D48', {'type': '2_color_scale', 'min_color': '#c7f2da','max_color': '#54d68f'})
+worksheet.conditional_format('E2:E48', {'type': '2_color_scale','min_color': '#C5D9F1','max_color': '#538ED5'})
+worksheet.conditional_format('F2:F48', {'type': '2_color_scale', 'min_color': '#c7f2da','max_color': '#54d68f'})
+worksheet.conditional_format('G2:G48', {'type': '2_color_scale','min_color': '#C5D9F1','max_color': '#538ED5'})
+worksheet.conditional_format('H2:H48', {'type': '2_color_scale', 'min_color': '#c7f2da','max_color': '#54d68f'})
+writer.save()
+
+
+
+
 # count rho2 and rho3 moderate corr (0.6<rho<0.8)
 count_moderate3 = sum(map(lambda x : 0.6<x<0.8, rho_list3))
 count_weak3 = sum(map(lambda x : x<0.6, rho_list3))
@@ -722,7 +799,19 @@ print('paired t test = ','%.5f' %ttest, ', p-value = ','%.4f' %pval)
 ttest2,pval2 = stats.ttest_rel(rho_list1,rho_list3)
 print('paired t test = ','%.5f' %ttest2, ', p-value = ','%.4f' %pval2)
 
-############################################################################
+avg_valid_day=np.asarray(valid_day).mean()
+avg_valid_day=(np.asarray(valid_day).sum()-29)/46
+
+plt.figure(figsize=(9,6))
+plt.hist(valid_day, bins=10)
+plt.grid(True,alpha=0.3)
+plt.xlabel('Valid Days',fontsize=30, family = 'Times New Roman')
+plt.ylabel('Frequency',fontsize=30,family = 'Times New Roman')
+plt.xticks(fontsize=20, family='Times New Roman')
+plt.yticks(fontsize=20, family='Times New Roman')
+
+
+#############################################################################
 # Paired t test
 #############################################################################
 ttest_list1=[];pval_list1=[];ttest_list2=[];pval_list2=[];ttest_list3=[];pval_list3=[]
@@ -786,52 +875,146 @@ def get_transition_in_dates(cleaned_ila,choppedTime):
 
         transition.append(len(merge_labelled_ilaList))
 
-    merged_df = pd.DataFrame({'Day':day,'Transition daily':transition})
+    merged_df = pd.DataFrame({'Day':day,'num of transition':transition})
     return merged_df
 
-index=0 # 3-1: index =0, 3-121: index=9
+index=20 # 3-27: index =27, 3-121: index=6
 case = finally_sensor_list[index]
 case_df = get_transition_in_dates(case,choppedTime)
-case_mobility = temp_sensor_derived_steps[index]
-case_df['fixed-speed steps'] = case_mobility
 case_df['mobility'] = temp_mobility[index]
+case_df['fixed-speed steps'] = temp_sensor_derived_steps[index]
+case_df['total firing'] = temp_total_triggering[index]
 
 #case_df.to_csv(r'D:\DACS\Archive\case_df.csv')
 # now get Y axis and X axis
 dates = [pd.to_datetime(date) for date in case_df['Day']]
 
 # set the plot
-plt.figure(figsize =(12,9))
-plt.subplot(2, 1, 1)
-plt.scatter(dates, case_df['mobility'],label='Fixed-distance Mobility',s =20, c = 'red')
+plt.figure(figsize =(12,12))
+plt.subplot(4, 1, 1)
+plt.scatter(dates, case_df['mobility'],label='Room Distance Travelled',s =20, c = 'red')
 plt.grid(True,alpha=0.5)
 plt.legend(loc='upper left')
 plt.ylabel('Mobility in Steps')
 plt.ylim(0,)
-plt.xlim(dates[0],dates[-1])
+#plt.xlim(dates[0],dates[-1])
 
-plt.subplot(2, 1, 2)
-plt.scatter(dates, case_df['Transition daily'],label='Room Transitions',s =20, c = 'blue')
+plt.subplot(4, 1, 2)
+plt.scatter(dates, case_df['num of transition'],label='Room Transitions',s =20, c = 'orange')
 plt.grid(True,alpha=0.5)
 plt.legend(loc='upper left')
-plt.ylabel('Transition Counts')
+plt.ylabel('Freqeuncy of Room Transition')
 plt.ylim(0,)
-plt.xlim(dates[0],dates[-1])
+#plt.xlim(dates[0],dates[-1])
+
+plt.subplot(4, 1, 3)
+plt.scatter(dates, case_df['total firing'],label='Total Firings',s =20, c = 'green')
+plt.grid(True,alpha=0.5)
+plt.legend(loc='upper left')
+plt.ylabel('Total Firings')
+plt.ylim(0,)
+#plt.xlim(dates[0],dates[-1])
+
+plt.subplot(4, 1, 4)
+plt.scatter(dates, case_df['fixed-speed steps'],label='Fix-speed Mobility',s =20, c = 'blue')
+plt.grid(True,alpha=0.5)
+plt.legend(loc='upper left')
+plt.ylabel('Fix-speed Mobility')
+plt.ylim(0,)
+#plt.xlim(dates[0],dates[-1])
 
 #-----------------------
 # get linear regression plot
-plt.figure(figsize =(10,4))
 # m = slope, b=intercept
-m, b = np.polyfit(case_df['mobility'], case_df['Transition daily'], 1)
-r_squared = r_sq_list2[index]
-plt.plot(case_df['mobility'], m*case_df['mobility'] + b,color="r",label='y={:.2f}x+{:.2f}'.format(m,b))
-plt.legend(loc='upper left')
-plt.plot(case_df['mobility'], case_df['Transition daily'], '+')
-plt.grid(True,alpha=0.5)
+m, b = np.polyfit(case_df['mobility'], case_df['num of transition'], 1)
+r_squared1 = r_sq_list1[index]
+m2, b2 = np.polyfit(case_df['mobility'], case_df['total firing'], 1)
+r_squared2 = r_sq_list3[index]
+m3, b3 = np.polyfit(case_df['mobility'], case_df['fixed-speed steps'], 1)
+r_squared3 = r_sq_list2[index]
 
-plt.xlabel('Mobility in Steps')
-plt.ylabel('Transition Counts')
+my_font='Times New Roman'
+
+plt.figure(figsize =(15,15))
+
+plt.subplot(3, 1, 1)
+plt.plot(case_df['mobility'], m*case_df['mobility'] + b,color="r",label='Y={:.2f}X+{:.2f},R-square={:.2f}'.format(m,b,r_squared1))
+plt.legend(loc='lower right', prop = {'size': 20,'family':my_font})
+plt.plot(case_df['mobility'], case_df['num of transition'], '+')
+plt.grid(True,alpha=0.5)
+plt.xticks(fontsize=18, family=my_font);plt.yticks(fontsize=18, family=my_font)
+plt.xlabel('Room Distance Travelled',fontsize = 20,family=my_font)
+plt.ylabel('Freqeuncy of Room Transition',fontsize = 20,family=my_font)
  
+plt.subplot(3, 1, 2)
+plt.plot(case_df['mobility'], m2*case_df['mobility'] + b2,color="r",label='Y={:.2f}X+{:.2f},R-square={:.2f}'.format(m2,b2,r_squared2))
+plt.legend(loc='lower right', prop = {'size': 20,'family':my_font})
+plt.plot(case_df['mobility'], case_df['num of transition'], '+')
+plt.grid(True,alpha=0.5)
+plt.xticks(fontsize=18, family=my_font);plt.yticks(fontsize=18, family=my_font)
+plt.xlabel('Room Distance Travelled',fontsize = 20,family=my_font)
+plt.ylabel('Total Firings',fontsize = 20,family=my_font)
+ 
+plt.subplot(3, 1, 3)
+plt.plot(case_df['mobility'],(m3*case_df['mobility'] + b3)/400 ,color="r",label='Y={:.2f}X+{:.2f},R-square={:.2f}'.format(m3,b3,r_squared3))
+plt.legend(loc='lower right', prop = {'size': 20,'family':my_font})
+plt.plot(case_df['mobility'], case_df['num of transition'], '+')
+plt.grid(True,alpha=0.5)
+plt.xticks(fontsize=18, family=my_font);plt.yticks(fontsize=18, family=my_font)
+#plt.yscale('log')
+plt.xlabel('Room Distance Travelled',fontsize = 20,family=my_font)
+plt.ylabel('Fix-speed Mobility',fontsize = 20,family=my_font)
+plt.xtick()
+
+  
+
+#---------------------------------
+mobility_70s_male_list = [43,23,17,37]
+mobility_70s_female_list = [32,10,39,9]
+mobility_80s_male_list = [0,1,20,44]
+mobility_80s_female_list = [15,38,27,6]
+
+def get_mobility_data(mobility_index_list, temp_mobility):
+    temp_mobility_for_selected_group=[]
+    for i in mobility_index_list:
+        temp_mobility_for_selected_group.append(temp_mobility[i])
+    return temp_mobility_for_selected_group
+
+mobility_70s_male = get_mobility_data(mobility_70s_male_list, temp_mobility)
+mobility_70s_female = get_mobility_data(mobility_70s_female_list, temp_mobility)
+mobility_80s_male = get_mobility_data(mobility_80s_male_list, temp_mobility)
+mobility_80s_female = get_mobility_data(mobility_80s_female_list, temp_mobility)
+
+transition_70s_male = get_mobility_data(mobility_70s_male_list, temp_transition)
+transition_70s_female = get_mobility_data(mobility_70s_female_list, temp_transition)
+transition_80s_male = get_mobility_data(mobility_80s_male_list, temp_transition)
+transition_80s_female = get_mobility_data(mobility_80s_female_list, temp_transition)
+
+
+kwargs = dict(alpha=0.5, bins=100)
+plt.hist([item for sublist in transition_80s_male for item in sublist],**kwargs, color='b', label='male room transitions')
+plt.hist([item for sublist in transition_80s_female for item in sublist],**kwargs, color='g', label='female room transitions')
+plt.legend()
+plt.title('Number of room transitions in 80s male and female')
+
+def two_group_ttest(group_a, group_b):
+    a = [item for sublist in group_a for item in sublist]
+    b = [item for sublist in group_b for item in sublist]
+    ttest,pval = stats.ttest_ind(a,b)
+    return ttest,pval
+    
+ttest,pval = two_group_ttest(transition_80s_male, transition_80s_female)
+print("{:.2f}".format(ttest),pval)
+
+def get_mean_and_std(group_a):
+    a = np.asarray([item for sublist in group_a for item in sublist])
+    avg = a.mean()
+    std = a.std()
+    return avg,std
+avg0,std0 = get_mean_and_std(mobility_70s_female)
+print("{:.2f}".format(avg0),'±',"{:.2f}".format(std0))
+
+
 #############################################################################
 # Correlation Comparision
 #############################################################################
