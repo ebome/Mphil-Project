@@ -514,31 +514,156 @@ def get_time_diff_list(cleaned_ila,choppedTime):
                                              'time diff':time_diff_list_all_days})
 
     return single_user_transion_time_diff, single_user_transion_time_diff_with_date
+#======================================
+def get_time_diff_for_one_room_part_A(cleaned_ila,choppedTime):
+    room_num = len(cleaned_ila['changed_sensor_id'].unique().tolist())
+    transition=[];time_diff_list_all_days=[];day=[]
+    for i in range(len(choppedTime)-1):
+        # get daily sensor reading
+        choppedila_day  = cleaned_ila[cleaned_ila['local_timestamp'] > choppedTime[i]]
+        choppedila_day  = choppedila_day[choppedila_day['local_timestamp'] < choppedTime[i+1]]
+        # choppedTime start  4-26, hence sometime the choppedila_day could be length 0
+        if len(choppedila_day)==0:
+            continue
+        # label the transitions and change them to merged transition labels
+        ila_lablled = labelled_room_and_time_diff(choppedila_day)
+        time_diff_list = ila_lablled['time difference'].values.tolist()
+        # get choppedila_day dataframe's date
+        that_day_list = choppedila_day.local_timestamp.tolist()
+        that_day = that_day_list[0][0:10:] # trim datetime hours
+        day.append(that_day)
+
+        if room_num == 5:
+            merge_labelled_ilaList = ms.merge_5_sensors(ila_lablled)
+        if room_num == 6:
+            merge_labelled_ilaList = ms.merge_6_sensors(ila_lablled)
+        if room_num == 7:
+            merge_labelled_ilaList = ms.merge_7_sensors(ila_lablled)
+        if room_num == 8:
+            merge_labelled_ilaList = ms.merge_8_sensors(ila_lablled)
+        if room_num == 9:
+            merge_labelled_ilaList = ms.merge_9_sensors(ila_lablled)
+        if room_num == 10:
+            merge_labelled_ilaList = ms.merge_10_sensors(ila_lablled)
+    
+        # temp has the same length as time_diff_list, they are all for one day
+        time_diff_list_all_days.append(time_diff_list)
+        transition.append(merge_labelled_ilaList)
+    
+    return time_diff_list_all_days,transition,day
+
+def get_time_diff_for_one_room_part_B(time_diff_list_all_days,transition,day,room_str):
+    # now get the index for the room_label
+    one_room_time_diff_by_days=[]
+    for j in range(len(transition)):
+        each_day_s_transition_label = transition[j]
+        indices = []
+        for i in range(len(each_day_s_transition_label)):
+            if each_day_s_transition_label[i] == room_str:
+                indices.append(i)
+        
+        store_list = []
+        each_day_s_time_diff_one_room = time_diff_list_all_days[j]
+        for each_index in indices:
+           store_list.append(each_day_s_time_diff_one_room[each_index])
+           
+        one_room_time_diff_by_days.append(store_list)
+    
+    # make them as dataframe
+    one_room_time_diff_with_date=pd.DataFrame({'Day':day,
+                                             'one_room_time_diff':one_room_time_diff_by_days})
+
+    return one_room_time_diff_with_date
 
 #--------------------------------  
 test_user = remove_consecutive_dup_motion_data[20]
 single_user_transion_time_diff, single_user_transion_time_diff_with_date = get_time_diff_list(test_user,choppedTime)
-
 aaa = single_user_transion_time_diff_with_date['transition label'].tolist()[0]
 aaab = [x for xs in aaa for x in xs.split(',')]
 
+
+def get_28day_allday_time_diff(one_user,choppedTime):
+    time_diff_list_all_days,transition,day = get_time_diff_for_one_room_part_A(one_user,choppedTime)
+    # get all room_str from 'transition'
+    flat_transition = [item for sublist in transition for item in sublist]
+    all_room_strs = list(set(flat_transition))
+    # loop all_room_strs
+    time_diff_for_all_room_pair=[]
+    for room_str in all_room_strs:
+        one_room_time_diff_with_date = get_time_diff_for_one_room_part_B(time_diff_list_all_days,transition,day,room_str)
+        flat_one_room_time_diff_28day = [item for sublist in one_room_time_diff_with_date[0:29]['one_room_time_diff'].tolist() for item in sublist]
+        avg_28day = np.asarray(flat_one_room_time_diff_28day).mean()
+        flat_one_room_time_diff_Allday = [item for sublist in one_room_time_diff_with_date['one_room_time_diff'].tolist() for item in sublist]
+        avg_Allday = np.asarray(flat_one_room_time_diff_Allday).mean()
+        time_diff_for_all_room_pair.append(avg_Allday-avg_28day)
+    return time_diff_for_all_room_pair
+
+all_user_time_diff =[]
+for each_user in remove_consecutive_dup_motion_data:
+    time_diff_for_all_room_pair = get_28day_allday_time_diff(each_user,choppedTime)
+    all_user_time_diff.append(time_diff_for_all_room_pair)
+
+falt_all_user_time_diff= [item for sublist in all_user_time_diff for item in sublist]
+cleanedList = [x for x in falt_all_user_time_diff if str(x) != 'nan']
+plt.hist(cleanedList,bins=50)
+cleanedList2 = [x for x in cleanedList if abs(x) < 240]
+x = list(range(len(cleanedList2)))
+
+plt.figure(figsize=(10,10))
+plt.scatter(x,cleanedList2,c='r',s=10)
+plt.xlabel('room pairs')
+
+
+#---------------------------------------
+def get_accumulate_avg_time(ploting_data_with_14_lists):
+    indices = list(range(1,len(ploting_data_with_14_lists)+1))
+    print(indices)
+    avg_time_accumulation =[]
+    for x in indices:
+        flat_ploting_data_with_14_lists = [item for sublist in ploting_data_with_14_lists[0:x] for item in sublist]
+        accumulate_avg = np.asarray(flat_ploting_data_with_14_lists).mean()
+        avg_time_accumulation.append(accumulate_avg)
+    return avg_time_accumulation
+
+time_diff_list_all_days,transition,day = get_time_diff_for_one_room_part_A(test_user,choppedTime)
+room_str = '1 to 2'
+one_room_time_diff_with_date = get_time_diff_for_one_room_part_B(time_diff_list_all_days,transition,day,room_str)
+day_length = 14
+ploting_dates= one_room_time_diff_with_date.iloc[0:day_length+1]['Day'].tolist()
+ploting_data= one_room_time_diff_with_date.iloc[0:day_length+1]['one_room_time_diff'].tolist()
+avg_time_accumulation = get_accumulate_avg_time(ploting_data)
+plt.plot(avg_time_accumulation);plt.xlabel('Days');plt.ylabel('Accumulative mean transiton time for two rooms')
+plt.title(room_str+' transition time accumulative mean plot')
+
+plt.figure(figsize=(10,5))
+for xe, ye in zip(ploting_dates, ploting_data):
+    plt.scatter([xe] * len(ye), ye, s=9, c='r')
+plt.yscale('log')    
+plt.title('user 3-175 '+room_str+' transition time')
+plt.xlabel('First 14 days')
+plt.ylabel('Log(Transition duration (seconds))')
+plt.xticks(list(range(len(ploting_dates))))
+plt.axes().set_xticklabels(ploting_dates,rotation='vertical')
 #--------------------------------  
-def find_avg_time_diff_for_labels(single_user_transion_time_diff):
+def find_avg_time_diff_for_labels(single_user_transion_time_diff,first_x_days):
     # find the avg time diff of each label
     time_diff_grouped_list = list(single_user_transion_time_diff.groupby(['transition label']))
 
-    avg=[];labels=[];median =[]
+    avg=[];labels=[];median =[];transition_time_every_day=[];
     for each_label in time_diff_grouped_list:
-        each_label_avg = each_label[1]['time diff'].mean()
-        each_label_median =  each_label[1]['time diff'].median()
+        transition_time_every_day.append(each_label[1]['time diff'].tolist())
+
+        each_label_avg = np.array(each_label[1]['time diff'].tolist()[0:first_x_days+1]).mean()
+        each_label_median = np.median(np.array(each_label[1]['time diff'].tolist()[0:first_x_days+1]))
         avg.append(each_label_avg)
         median.append(each_label_median)
         labels.append(each_label[0])
     avg_time_diff_for_labels = pd.DataFrame({'label':labels,'avg time(s)':avg,
-                                             'median time(s)':median})
+                                             'median time(s)':median,
+                                             'transition_time_every_day':transition_time_every_day})
     return avg_time_diff_for_labels
 #--------------------------------  
-avg_and_median_time_diff_for_labels = find_avg_time_diff_for_labels(single_user_transion_time_diff)
+avg_and_median_time_diff_for_labels = find_avg_time_diff_for_labels(single_user_transion_time_diff,28)
 df = avg_and_median_time_diff_for_labels.copy(deep=True)
 data_dict = dict(zip(df['label'].tolist(), df['median time(s)'].tolist()))
 [data_dict[x] for x in aaab]
@@ -566,7 +691,7 @@ temp_sensor_derived_steps=[]
 for each_user in remove_consecutive_dup_motion_data:
     single_user_transion_time_diff, single_user_transion_time_diff_with_date = get_time_diff_list(each_user,choppedTime)
     # get the avg time diff for this user 
-    avg_and_median_time_diff_for_labels = find_avg_time_diff_for_labels(single_user_transion_time_diff)
+    avg_and_median_time_diff_for_labels = find_avg_time_diff_for_labels(single_user_transion_time_diff,28)
     # now for this user, every day there is a mobility. In total there are X days mobility
     this_user_all_the_days = get_daily_sensor_derived_steps(avg_and_median_time_diff_for_labels,single_user_transion_time_diff_with_date)
     temp_sensor_derived_steps.append(this_user_all_the_days) 
@@ -643,28 +768,36 @@ result3 = bootstrap(flat_total_firing, 1000, 0.95, average)
 print(result3)
 
 # view each parameter distribution
-kwargs = dict(alpha=0.7, bins=10)
-plt.figure(figsize =(18,5))
-plt.subplot(1,3,1)
+kwargs = dict(bins=30)
+plt.figure(figsize =(12,12))
+user = 38
+plt.subplot(2,2,1)
+plt.xlabel('Travelled Room Distance',fontsize=20, family = 'Times New Roman')
+plt.ylabel('Frequency',fontsize=20,family = 'Times New Roman')
+plt.xticks(fontsize=15, family='Times New Roman')
+plt.yticks(fontsize=15, family='Times New Roman')
+plt.hist(temp_mobility[user],**kwargs,color='#66ccff') # [a-b for a,b in zip(rho_list3,rho_list1)]
+
+plt.subplot(2,2,2)
 plt.xlabel('Fixed-speed Mobility',fontsize=20, family = 'Times New Roman')
 plt.ylabel('Frequency',fontsize=20,family = 'Times New Roman')
 plt.xticks(fontsize=15, family='Times New Roman')
 plt.yticks(fontsize=15, family='Times New Roman')
-plt.hist(flat_sensor_derived_steps,**kwargs) # [a-b for a,b in zip(rho_list3,rho_list1)]
+plt.hist(temp_sensor_derived_steps[user],**kwargs) # [a-b for a,b in zip(rho_list3,rho_list1)]
 
-plt.subplot(1,3,2)
+plt.subplot(2,2,3)
 plt.xlabel('Number of Room Transition',fontsize=20, family = 'Times New Roman')
 plt.ylabel('Frequency',fontsize=20,family = 'Times New Roman')
 plt.xticks(fontsize=15, family='Times New Roman')
 plt.yticks(fontsize=15, family='Times New Roman')
-plt.hist(flat_transition,**kwargs)
+plt.hist(temp_transition[user],**kwargs)
 
-plt.subplot(1,3,3)
+plt.subplot(2,2,4)
 plt.xlabel('Total Sensor Firing',fontsize=20, family = 'Times New Roman')
 plt.ylabel('Frequency',fontsize=20,family = 'Times New Roman')
 plt.xticks(fontsize=15, family='Times New Roman')
 plt.yticks(fontsize=15, family='Times New Roman')
-plt.hist(flat_total_firing,**kwargs)
+plt.hist(temp_total_triggering[user],**kwargs)
 
 
 #############################################################################
@@ -758,12 +891,12 @@ spearman_result = pd.DataFrame({'User':user_list_mob_added,'Valid days':valid_da
 
 spearman_result.to_excel(r'D:\DACS\dasc individual correlation coefficients data up to 2020 May.xlsx')     
 spearman_result = spearman_result.set_index('User')
-
 # Create a Pandas Excel writer using XlsxWriter as the engine.
 excel_file = r'D:\DACS\image_table_type.xlsx'
 sheet_name = 'Sheet1'
 writer = pd.ExcelWriter(excel_file, engine='xlsxwriter')
 spearman_result.to_excel(writer, sheet_name=sheet_name)
+
 # Access the XlsxWriter workbook and worksheet objects from the dataframe.
 # This is equivalent to the following using XlsxWriter on its own:
 #
@@ -786,17 +919,19 @@ worksheet.conditional_format('H2:H48', {'type': '2_color_scale', 'min_color': '#
 writer.save()
 
 
+
 plt.figure(figsize=(7,17))
 plt.scatter(spearman_result['Rho1 mobility and transition'],spearman_result.index,label='travelled room distance & room transitions')
 plt.scatter(spearman_result['Rho2 mobility and fixed-speed'],spearman_result.index,label='travelled room distance & fixed-speed mobility')
 plt.scatter(spearman_result['Rho3 mobility and total_firing'],spearman_result.index,label='travelled room distance & total sensor firings')
 plt.grid(axis='both',alpha=0.3)
-plt.xlim([0.6,1])
+plt.xlim([0.2,1])
 plt.legend(loc='upper left',shadow=True,prop={'family':'Times New Roman', 'size':11})
 plt.xlabel('Spearman Correlation Coefficient',fontsize=20, family = 'Times New Roman')
 plt.ylabel('Participants',fontsize=30,family = 'Times New Roman')
 plt.xticks(fontsize=15, family='Times New Roman')
 plt.yticks(fontsize=13, family='Times New Roman')
+
 
 
 
@@ -849,7 +984,7 @@ paire_ttest_result.to_csv(r'D:\DACS\Individual Participant paired T test.csv')
 
 
 #############################################################################
-# Case Study: 3-1
+# Case Study
 #############################################################################
 # get_transition_arrays will give daily transition numbers
 # if that day does not exist, then it returns 0
@@ -889,50 +1024,86 @@ def get_transition_in_dates(cleaned_ila,choppedTime):
     merged_df = pd.DataFrame({'Day':day,'num of transition':transition})
     return merged_df
 
-index=20 # 3-27: index =27, 3-121: index=6
-case = finally_sensor_list[index]
-case_df = get_transition_in_dates(case,choppedTime)
-case_df['mobility'] = temp_mobility[index]
-case_df['fixed-speed steps'] = temp_sensor_derived_steps[index]
-case_df['total firing'] = temp_total_triggering[index]
+# 3-27: index =27, 3-121: index=6
+def create_the_case_df(user_index,choppedTime):
+    case = finally_sensor_list[user_index]
+    case_df = get_transition_in_dates(case,choppedTime)
+    case_df['mobility'] = temp_mobility[user_index]
+    case_df['fixed-speed steps'] = temp_sensor_derived_steps[user_index]
+    case_df['total firing'] = temp_total_triggering[user_index]
+    return case_df
 
-#case_df.to_csv(r'D:\DACS\Archive\case_df.csv')
-# now get Y axis and X axis
-dates = [pd.to_datetime(date) for date in case_df['Day']]
+case_df_good = create_the_case_df(0,choppedTime)
 
-# set the plot
-plt.figure(figsize =(12,12))
-plt.subplot(4, 1, 1)
-plt.scatter(dates, case_df['mobility'],label='Room Distance Travelled',s =20, c = 'red')
-plt.grid(True,alpha=0.5)
-plt.legend(loc='upper left')
-plt.ylabel('Mobility in Steps')
-plt.ylim(0,)
-#plt.xlim(dates[0],dates[-1])
+# fill the missing dates with nan value
+def fill_miss_dates_with_nan(case_df_good):       
+    start_time = dt.datetime.strptime(case_df_good['Day'].tolist()[0], '%Y-%m-%d')
+    end_time = dt.datetime.strptime(case_df_good['Day'].tolist()[-1], '%Y-%m-%d')
+    period_len = (end_time - start_time).days+1
+    datelist = pd.date_range(start_time, periods = period_len).tolist()
+    # cast dataframe 'Day' to datetime
+    case_df_good['Day'] = [dt.datetime.strptime(each, '%Y-%m-%d') for each in case_df_good['Day'].tolist()]
+    case_df_good.index = pd.DatetimeIndex(case_df_good['Day'])
+    case_df_good = case_df_good.reindex(datelist, fill_value=float('nan'))
+    return case_df_good
 
-plt.subplot(4, 1, 2)
-plt.scatter(dates, case_df['num of transition'],label='Room Transitions',s =20, c = 'orange')
-plt.grid(True,alpha=0.5)
-plt.legend(loc='upper left')
-plt.ylabel('Freqeuncy of Room Transition')
-plt.ylim(0,)
-#plt.xlim(dates[0],dates[-1])
+case_df_bad = create_the_case_df(42,choppedTime)
+case_df = fill_miss_dates_with_nan(case_df_bad)
 
-plt.subplot(4, 1, 3)
-plt.scatter(dates, case_df['total firing'],label='Total Firings',s =20, c = 'green')
-plt.grid(True,alpha=0.5)
-plt.legend(loc='upper left')
-plt.ylabel('Total Firings')
-plt.ylim(0,)
-#plt.xlim(dates[0],dates[-1])
 
-plt.subplot(4, 1, 4)
-plt.scatter(dates, case_df['fixed-speed steps'],label='Fix-speed Mobility',s =20, c = 'blue')
-plt.grid(True,alpha=0.5)
-plt.legend(loc='upper left')
-plt.ylabel('Fix-speed Mobility')
-plt.ylim(0,)
-#plt.xlim(dates[0],dates[-1])
+def cumulative_plot(case_df): 
+    # case_df should not have missing days, no nan should included
+    x = np.array(case_df['mobility'].tolist())
+    y = np.array(case_df['fixed-speed steps'].tolist())
+    #x = x/np.max(x)
+    #y = y/np.max(y)
+    cumulative_x = np.cumsum(x)
+    cumulative_y = np.cumsum(y)
+    plt.plot(cumulative_x,cumulative_y)
+    plt.title('3-27 accumulative transitions VS accumulative travelled distance')
+    plt.xlabel('accumulative travelled distance')
+    plt.ylabel('accumulative number of transitions')
+
+def plot_pattern(user_x):
+    user = user_list_mob[user_x]
+    case_df_bad = create_the_case_df(user_x,choppedTime)
+    case_df = fill_miss_dates_with_nan(case_df_bad)
+    # set the plot
+    plt.figure(figsize =(12,12))
+    plt.subplot(4, 1, 1)
+    plt.title(user +' indoor pattern')
+    plt.plot(case_df.index, case_df['mobility'],label='Room Distance Travelled', c = 'red')
+    plt.grid(alpha=0.5)
+    plt.legend(loc='upper left')
+    plt.ylabel('Mobility in Steps')
+    plt.ylim(0,)
+    #plt.xlim(dates[0],dates[-1])
+    
+    plt.subplot(4, 1, 2)
+    plt.plot(case_df.index, case_df['num of transition'],label='Room Transitions',c = 'orange')
+    plt.grid(True,alpha=0.5)
+    plt.legend(loc='upper left')
+    plt.ylabel('Freqeuncy of Room Transition')
+    plt.ylim(0,) 
+    
+    plt.subplot(4, 1, 3)
+    plt.plot(case_df.index, case_df['total firing'],label='Total Firings', c = 'green')
+    plt.grid(True,alpha=0.5)
+    plt.legend(loc='upper left')
+    plt.ylabel('Total Firings')
+    plt.ylim(0,)
+    
+    plt.subplot(4, 1, 4)
+    plt.plot(case_df.index, case_df['fixed-speed steps'],label='Fix-speed Mobility',c = 'blue')
+    plt.grid(True,alpha=0.5)
+    plt.legend(loc='upper left')
+    plt.ylabel('Fix-speed Mobility')
+    plt.ylim(0,)
+
+plot_pattern(43)
+plot_pattern(44)
+plot_pattern(45)
+plot_pattern(46)
 
 #-----------------------
 # get linear regression plot
@@ -977,7 +1148,6 @@ plt.xlabel('Room Distance Travelled',fontsize = 20,family=my_font)
 plt.ylabel('Fix-speed Mobility',fontsize = 20,family=my_font)
 plt.xtick()
 
-  
 
 #---------------------------------
 mobility_70s_male_list = [43,23,17,37]
@@ -1047,3 +1217,75 @@ print('spearmanr all_mobility VS all_fix_speed_step p-val',each_user_p_val2)
 each_user_rho3,each_user_p_val3 = stats.spearmanr(flat_mobility,flat_total_firing)
 print('spearmanr all_mobility VS all_total_firing rho:',each_user_rho3)
 print('spearmanr all_mobility VS all_total_firing p-val',each_user_p_val3)
+
+
+
+
+#############################################################################
+# Room distance
+#############################################################################
+from collections import ChainMap
+
+all_dacs_room_matrix = pd.read_csv(r'D:\DACS\Archive\DACS_Room_Distances.csv')
+room_matrix_grouped_list = list(all_dacs_room_matrix.groupby(['PID']))
+
+def getUniqueItems(d):
+    result = {}
+    for key,value in d.items():
+        if value not in result.values():
+            result[key] = value
+    return result   
+
+def remove_duplicate_rooms(unit_matrix):
+    room1_list = unit_matrix['room1_id'].tolist()
+    room2_list = unit_matrix['room2_id'].tolist()
+    room_to_room_list =list(map(list, zip(room1_list,room2_list)))
+    room_to_room_list = [str(sorted(each)) for each in room_to_room_list]
+    indexes = unit_matrix.index.tolist()
+    room_to_room_dict_list = [{k: v} for k, v in zip(indexes, room_to_room_list)]
+    room_to_room_dict =  dict(ChainMap(*room_to_room_dict_list))
+    # remove duplicate values from dictionary
+    result = getUniqueItems(room_to_room_dict)
+    # from result get indexes and keep indexes in dataframe
+    aab = unit_matrix.loc[list(result.keys())]
+    return aab 
+
+reformed_room_matrix_list_temp=[]    
+for each_unit in room_matrix_grouped_list:
+    unit_matrix = each_unit[1]
+    unit_matrix_cleaned = remove_duplicate_rooms(unit_matrix)    
+#    divisor = max(unit_matrix['distance'].tolist())
+#    unit_matrix['distance'] = unit_matrix['distance']/divisor
+    reformed_room_matrix_list_temp.append(unit_matrix_cleaned)
+
+room_distances = pd.DataFrame({})
+for each in reformed_room_matrix_list_temp:
+    room_distances = room_distances.append(each)
+    
+# the users I suspect
+from matplotlib.ticker import PercentFormatter
+size = []
+for each in reformed_room_matrix_list_temp:
+    size.append(each['distance'].tolist())
+flat_size = [item for sublist in size for item in sublist]
+kwargs = dict(bins=20)
+plt.hist(flat_size, weights =np.ones(len(flat_size))/len(flat_size),**kwargs)
+plt.gca().yaxis.set_major_formatter(PercentFormatter(1))
+plt.xlabel('Room-to-room Distance (Steps)',fontsize=15, family = 'Times New Roman')
+plt.ylabel('Percentage',fontsize=15,family = 'Times New Roman')
+plt.xticks(fontsize=12, family='Times New Roman')
+plt.yticks(fontsize=12, family='Times New Roman')
+
+
+
+aaa = list(set(reformed_room_matrix_list_temp[27]['distance'].tolist()))
+plt.plot(list(range(len(aaa))),sorted(aaa))
+
+plt.plot([4,6,10,12],[42,56,98,102])
+
+
+
+
+
+
+
