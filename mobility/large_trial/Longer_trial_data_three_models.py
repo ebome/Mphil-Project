@@ -5,8 +5,70 @@ import numpy as np
 from matplotlib import pyplot as plt
 import copy
 
+#############################################################################
+# Room distance
+#############################################################################
+from collections import ChainMap
+
+all_dacs_room_matrix = pd.read_csv(r'D:\DACS\Archive\DACS_Room_Distances.csv')
+room_matrix_grouped_list = list(all_dacs_room_matrix.groupby(['PID']))
+
+def getUniqueItems(d):
+    result = {}
+    for key,value in d.items():
+        if value not in result.values():
+            result[key] = value
+    return result   
+
+def remove_duplicate_rooms(unit_matrix):
+    room1_list = unit_matrix['room1_id'].tolist()
+    room2_list = unit_matrix['room2_id'].tolist()
+    room_to_room_list =list(map(list, zip(room1_list,room2_list)))
+    room_to_room_list = [str(sorted(each)) for each in room_to_room_list]
+    indexes = unit_matrix.index.tolist()
+    room_to_room_dict_list = [{k: v} for k, v in zip(indexes, room_to_room_list)]
+    room_to_room_dict =  dict(ChainMap(*room_to_room_dict_list))
+    # remove duplicate values from dictionary
+    result = getUniqueItems(room_to_room_dict)
+    # from result get indexes and keep indexes in dataframe
+    aab = unit_matrix.loc[list(result.keys())]
+    return aab 
+
+reformed_room_matrix_list_temp=[]    
+for each_unit in room_matrix_grouped_list:
+    unit_matrix = each_unit[1]
+    unit_matrix_cleaned = remove_duplicate_rooms(unit_matrix)    
+#    divisor = max(unit_matrix['distance'].tolist())
+#    unit_matrix['distance'] = unit_matrix['distance']/divisor
+    reformed_room_matrix_list_temp.append(unit_matrix_cleaned)
+
+room_distances = pd.DataFrame({})
+for each in reformed_room_matrix_list_temp:
+    room_distances = room_distances.append(each)
+    
+# the users I suspect
+from matplotlib.ticker import PercentFormatter
+size = []
+for each in reformed_room_matrix_list_temp:
+    size.append(each['distance'].tolist())
+flat_size = [item for sublist in size for item in sublist]
+kwargs = dict(bins=20)
+plt.hist(flat_size, weights =np.ones(len(flat_size))/len(flat_size),**kwargs)
+plt.gca().yaxis.set_major_formatter(PercentFormatter(1))
+plt.xlabel('Room-to-room Distance (Steps)',fontsize=15, family = 'Times New Roman')
+plt.ylabel('Percentage',fontsize=15,family = 'Times New Roman')
+plt.xticks(fontsize=12, family='Times New Roman')
+plt.yticks(fontsize=12, family='Times New Roman')
 
 
+
+aaa = list(set(reformed_room_matrix_list_temp[27]['distance'].tolist()))
+plt.plot(list(range(len(aaa))),sorted(aaa))
+
+plt.plot([4,6,10,12],[42,56,98,102])
+#############################################################################
+# Load mobility and sensor data
+#############################################################################
 all_dacs_sensor = pd.read_csv(r'D:\DACS\Archive\all_user_motion_sensor_up_to_may.csv')
 # remove the features that are not needed
 all_dacs_sensor = all_dacs_sensor.drop(columns=['Unnamed: 0','room_id'])
@@ -434,6 +496,24 @@ for i in range(len(cleaned_sensor_list)):
     aaa = remove_consecutive_dup(cleaned_sensor_list[i])
     remove_consecutive_dup_motion_data.append(aaa)
 
+# remove 'Pantry ' and 'Wardrobe 'that may have spaces
+remove_consecutive_rooms_data=[]
+for i in range(len(reformed_room_matrix_list_temp)):
+    each_matrix_df = reformed_room_matrix_list_temp[i]
+    each_motion_df = remove_consecutive_dup_motion_data[i]
+    # make lower cases of all words to compare
+    # trim each room's leading and trailing spaces
+    matrix_rooms_all = [each_matrix_df['room1_name'].tolist()+each_matrix_df['room2_name'].tolist()]
+    unique_room_names_in_matrix = list(sorted(set([item.strip() for sublist in matrix_rooms_all for item in sublist])))
+    unique_room_names_in_motion = list(sorted(set([each_name.strip() for each_name in each_motion_df['sensor_name'].tolist()])))
+    motion_rooms_not_in_matrix = [elem for elem in unique_room_names_in_motion if elem not in unique_room_names_in_matrix]
+    # as there are unique_room_names_in_motion havinf blank spaces, we cannot use .isin
+    for each_room_not_in_motion in motion_rooms_not_in_matrix:
+        each_motion_df = each_motion_df[~each_motion_df['sensor_name'].str.contains(each_room_not_in_motion)]
+    # aftering removing the unnecessary rooms, change sensor_id
+    each_motion_df = change_sensor_name(each_motion_df)
+    remove_consecutive_rooms_data.append(each_motion_df)
+
 '''
 For each user, the average time from room A to room B(and room B to room A) is constant by assumption.
 (Assume the user is always doing uniform linear motion in a constant speed, this speed is unknown but
@@ -488,6 +568,10 @@ def get_time_diff_list(cleaned_ila,choppedTime):
         that_day = that_day_list[0][0:10:] # trim datetime hours
         day.append(that_day)
 
+        if room_num == 3:
+            merge_labelled_ilaList = ms.merge_3_sensors(ila_lablled)
+        if room_num == 4:
+            merge_labelled_ilaList = ms.merge_4_sensors(ila_lablled)
         if room_num == 5:
             merge_labelled_ilaList = ms.merge_5_sensors(ila_lablled)
         if room_num == 6:
@@ -533,6 +617,10 @@ def get_time_diff_for_one_room_part_A(cleaned_ila,choppedTime):
         that_day = that_day_list[0][0:10:] # trim datetime hours
         day.append(that_day)
 
+        if room_num == 3:
+            merge_labelled_ilaList = ms.merge_3_sensors(ila_lablled)
+        if room_num == 4:
+            merge_labelled_ilaList = ms.merge_4_sensors(ila_lablled)
         if room_num == 5:
             merge_labelled_ilaList = ms.merge_5_sensors(ila_lablled)
         if room_num == 6:
@@ -574,9 +662,8 @@ def get_time_diff_for_one_room_part_B(time_diff_list_all_days,transition,day,roo
                                              'one_room_time_diff':one_room_time_diff_by_days})
 
     return one_room_time_diff_with_date
-
 #--------------------------------  
-test_user = remove_consecutive_dup_motion_data[20]
+test_user = remove_consecutive_rooms_data[44]
 single_user_transion_time_diff, single_user_transion_time_diff_with_date = get_time_diff_list(test_user,choppedTime)
 aaa = single_user_transion_time_diff_with_date['transition label'].tolist()[0]
 aaab = [x for xs in aaa for x in xs.split(',')]
@@ -599,20 +686,20 @@ def get_28day_allday_time_diff(one_user,choppedTime):
     return time_diff_for_all_room_pair
 
 all_user_time_diff =[]
-for each_user in remove_consecutive_dup_motion_data:
+for each_user in remove_consecutive_rooms_data:
     time_diff_for_all_room_pair = get_28day_allday_time_diff(each_user,choppedTime)
     all_user_time_diff.append(time_diff_for_all_room_pair)
 
 falt_all_user_time_diff= [item for sublist in all_user_time_diff for item in sublist]
-cleanedList = [x for x in falt_all_user_time_diff if str(x) != 'nan']
-plt.hist(cleanedList,bins=50)
-cleanedList2 = [x for x in cleanedList if abs(x) < 240]
+cleanedList1 = [x for x in falt_all_user_time_diff if str(x) != 'nan']
+plt.hist(cleanedList1,bins=50,color='r')
+cleanedList2 = [x for x in cleanedList1 if abs(x) < 240]
 x = list(range(len(cleanedList2)))
 
-plt.figure(figsize=(10,10))
+plt.figure(figsize=(8,5))
 plt.scatter(x,cleanedList2,c='r',s=10)
 plt.xlabel('room pairs')
-
+plt.ylabel('transition time difference = mean(all days) - mean(28 days) (seconds)')
 
 #---------------------------------------
 def get_accumulate_avg_time(ploting_data_with_14_lists):
@@ -644,7 +731,7 @@ plt.xlabel('First 14 days')
 plt.ylabel('Log(Transition duration (seconds))')
 plt.xticks(list(range(len(ploting_dates))))
 plt.axes().set_xticklabels(ploting_dates,rotation='vertical')
-#--------------------------------  
+#======================================
 def find_avg_time_diff_for_labels(single_user_transion_time_diff,first_x_days):
     # find the avg time diff of each label
     time_diff_grouped_list = list(single_user_transion_time_diff.groupby(['transition label']))
@@ -688,7 +775,7 @@ def get_daily_sensor_derived_steps(avg_and_median_time_diff_for_labels, single_u
 #--------------------------------
 # LONG TIME COMPUTING !! ~ 10 min
 temp_sensor_derived_steps=[]
-for each_user in remove_consecutive_dup_motion_data:
+for each_user in remove_consecutive_rooms_data:
     single_user_transion_time_diff, single_user_transion_time_diff_with_date = get_time_diff_list(each_user,choppedTime)
     # get the avg time diff for this user 
     avg_and_median_time_diff_for_labels = find_avg_time_diff_for_labels(single_user_transion_time_diff,28)
@@ -1006,6 +1093,10 @@ def get_transition_in_dates(cleaned_ila,choppedTime):
         that_day = that_day_list[0][0:10:] # trim datetime hours
         day.append(that_day)
         
+        if room_num == 3:
+            merge_labelled_ilaList = ms.merge_3_sensors(ila_lablled)
+        if room_num == 4:
+            merge_labelled_ilaList = ms.merge_4_sensors(ila_lablled)
         if room_num == 5:
             merge_labelled_ilaList = ms.merge_5_sensors(ila_lablled)
         if room_num == 6:
@@ -1220,68 +1311,6 @@ print('spearmanr all_mobility VS all_total_firing p-val',each_user_p_val3)
 
 
 
-
-#############################################################################
-# Room distance
-#############################################################################
-from collections import ChainMap
-
-all_dacs_room_matrix = pd.read_csv(r'D:\DACS\Archive\DACS_Room_Distances.csv')
-room_matrix_grouped_list = list(all_dacs_room_matrix.groupby(['PID']))
-
-def getUniqueItems(d):
-    result = {}
-    for key,value in d.items():
-        if value not in result.values():
-            result[key] = value
-    return result   
-
-def remove_duplicate_rooms(unit_matrix):
-    room1_list = unit_matrix['room1_id'].tolist()
-    room2_list = unit_matrix['room2_id'].tolist()
-    room_to_room_list =list(map(list, zip(room1_list,room2_list)))
-    room_to_room_list = [str(sorted(each)) for each in room_to_room_list]
-    indexes = unit_matrix.index.tolist()
-    room_to_room_dict_list = [{k: v} for k, v in zip(indexes, room_to_room_list)]
-    room_to_room_dict =  dict(ChainMap(*room_to_room_dict_list))
-    # remove duplicate values from dictionary
-    result = getUniqueItems(room_to_room_dict)
-    # from result get indexes and keep indexes in dataframe
-    aab = unit_matrix.loc[list(result.keys())]
-    return aab 
-
-reformed_room_matrix_list_temp=[]    
-for each_unit in room_matrix_grouped_list:
-    unit_matrix = each_unit[1]
-    unit_matrix_cleaned = remove_duplicate_rooms(unit_matrix)    
-#    divisor = max(unit_matrix['distance'].tolist())
-#    unit_matrix['distance'] = unit_matrix['distance']/divisor
-    reformed_room_matrix_list_temp.append(unit_matrix_cleaned)
-
-room_distances = pd.DataFrame({})
-for each in reformed_room_matrix_list_temp:
-    room_distances = room_distances.append(each)
-    
-# the users I suspect
-from matplotlib.ticker import PercentFormatter
-size = []
-for each in reformed_room_matrix_list_temp:
-    size.append(each['distance'].tolist())
-flat_size = [item for sublist in size for item in sublist]
-kwargs = dict(bins=20)
-plt.hist(flat_size, weights =np.ones(len(flat_size))/len(flat_size),**kwargs)
-plt.gca().yaxis.set_major_formatter(PercentFormatter(1))
-plt.xlabel('Room-to-room Distance (Steps)',fontsize=15, family = 'Times New Roman')
-plt.ylabel('Percentage',fontsize=15,family = 'Times New Roman')
-plt.xticks(fontsize=12, family='Times New Roman')
-plt.yticks(fontsize=12, family='Times New Roman')
-
-
-
-aaa = list(set(reformed_room_matrix_list_temp[27]['distance'].tolist()))
-plt.plot(list(range(len(aaa))),sorted(aaa))
-
-plt.plot([4,6,10,12],[42,56,98,102])
 
 
 
