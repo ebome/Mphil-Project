@@ -1,4 +1,36 @@
 # merge '3 to 4' and '4 to 3'
+def merge_3_sensors(ila_lablled):
+    label = ila_lablled['label'].values.tolist()
+    temp=[]
+    for i in range(0,len(label)):
+        if label[i] == '0 to 1' or label[i] == '1 to 0':
+            temp.append('0 to 1')
+        if label[i] == '0 to 2' or label[i] == '2 to 0':
+            temp.append('0 to 2')
+        if label[i] == '1 to 2' or label[i] == '2 to 1':
+            temp.append('1 to 2')
+
+    return temp
+
+def merge_4_sensors(ila_lablled):
+    label = ila_lablled['label'].values.tolist()
+    temp=[]
+    for i in range(0,len(label)):
+        if label[i] == '0 to 1' or label[i] == '1 to 0':
+            temp.append('0 to 1')
+        if label[i] == '0 to 2' or label[i] == '2 to 0':
+            temp.append('0 to 2')
+        if label[i] == '0 to 3' or label[i] == '3 to 0':
+            temp.append('0 to 3')
+        if label[i] == '1 to 2' or label[i] == '2 to 1':
+            temp.append('1 to 2')
+        if label[i] == '1 to 3' or label[i] == '3 to 1':
+            temp.append('1 to 3')
+        if label[i] == '2 to 3' or label[i] == '3 to 2':
+            temp.append('2 to 3')
+    return temp
+
+
 def merge_5_sensors(ila_lablled):
     label = ila_lablled['label'].values.tolist()
     temp=[]
