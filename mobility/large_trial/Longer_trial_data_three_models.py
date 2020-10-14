@@ -92,6 +92,10 @@ solitary_dacs_sensor = all_dacs_sensor[all_dacs_sensor['PID'].isin(solitary_user
 
 # check that '3-4' is in mobility , not sensor, so remove 3-4 from mobility
 solitary_dacs_mobility = solitary_dacs_mobility[~solitary_dacs_mobility['PID'].isin(['3-4'])]
+# check that '3-70' has 28 valid days, too short, so remove from mobility and sensor data
+solitary_dacs_mobility = solitary_dacs_mobility[~solitary_dacs_mobility['PID'].isin(['3-70'])]
+solitary_dacs_sensor = solitary_dacs_sensor[~solitary_dacs_sensor['PID'].isin(['3-70'])]
+
 people_list_sensor = solitary_dacs_sensor['PID'].unique().tolist()
 people_list_mobility = solitary_dacs_mobility['PID'].unique().tolist()
 
@@ -390,8 +394,6 @@ bbb = pd.DataFrame({'date':flat_date,'number of transitions':flat_transition})
 
 
 
-
-
 # for debug
 a_temp_transition=[]
 for mob in temp_transition:
@@ -507,7 +509,7 @@ for i in range(len(cleaned_sensor_list)):
 
 # remove 'Pantry ' and 'Wardrobe 'that may have spaces
 remove_consecutive_rooms_data=[]
-for i in range(len(reformed_room_matrix_list_temp)):
+for i in range(len(remove_consecutive_dup_motion_data)):
     each_matrix_df = reformed_room_matrix_list_temp[i]
     each_motion_df = remove_consecutive_dup_motion_data[i]
     # make lower cases of all words to compare
@@ -709,10 +711,20 @@ eee = pd.DataFrame({'date':flat_date,'median transition time 28Days':flat_sensor
 
 # for debug
 a_temp_sensor_derived_steps=[]
-for fix_speed_mob in temp_sensor_derived_steps:
+for fix_speed_mob in temp_sensor_derived_steps_28days:
     a_temp_sensor_derived_steps.append(len(fix_speed_mob))    
 aaa_indices_mob_fixspeed = debugging_two_temp_list_value(a_temp_sensor_derived_steps,a_temp_mobility)
 print('if indices has all TRUE in elements, then bug free')
+
+
+
+each_user = remove_consecutive_rooms_data[33]
+single_user_transion_time_diff, single_user_transion_time_diff_with_date = get_time_diff_list(each_user,choppedTime)
+    # get the avg time diff for this user 
+    avg_and_median_time_diff_for_labels_28days = find_avg_time_diff_for_labels_28Days(single_user_transion_time_diff)
+    # now for this user, every day there is a mobility. In total there are X days mobility
+    this_user_all_the_days = get_daily_sensor_derived_steps_28Days(avg_and_median_time_diff_for_labels_28days,single_user_transion_time_diff_with_date)
+
 
 
 #############################################################################
@@ -733,12 +745,13 @@ for i in range(len(temp_mobility)):
 # Visualization
 #############################################################################
 flat_mobility = [item for sublist in temp_mobility for item in sublist]
-flat_sensor_derived_steps = [item for sublist in temp_sensor_derived_steps for item in sublist]
 flat_transition = [item for sublist in temp_transition for item in sublist]
 flat_total_firing = [item for sublist in temp_total_triggering for item in sublist]
-flat_sensor_derived_steps_hours = [item/3600 for item in flat_sensor_derived_steps]
 flat_sensor_derived_steps_28days = [item for sublist in temp_sensor_derived_steps_28days for item in sublist]
 flat_sensor_derived_steps_28days_hours = [item/3600 for item in flat_sensor_derived_steps_28days]
+flat_sensor_derived_steps = [item for sublist in temp_sensor_derived_steps for item in sublist]
+flat_sensor_derived_steps_hours = [item/3600 for item in flat_sensor_derived_steps]
+
 
 # view each parameter distribution
 kwargs = dict(bins=40,color='#BCC3EB',edgecolor='black', linewidth=1.2)
@@ -782,7 +795,7 @@ r_sq_list1=[];intercept_list1=[];coef_list1=[]
 r_sq_list2=[];intercept_list2=[];coef_list2=[]
 r_sq_list3=[];intercept_list3=[];coef_list3=[]
 for i in range(len(temp_sensor_derived_steps)):
-    each_drived_step = temp_sensor_derived_steps[i]
+    each_drived_step = temp_sensor_derived_steps_28days[i]
     each_mobility = temp_mobility[i]
     each_total_trigger = temp_total_triggering[i]
     each_transition = temp_transition[i]
@@ -823,7 +836,6 @@ least_square_result = pd.DataFrame({'User':user_list_mob,'a0':intercept_list1,
                                'c1':coef_list3,'R^2 3':r_sq_list3})
 
     
-least_square_result.to_csv(r'D:\DACS\Individual Participant-linear regression.csv')    
 # count number of R^2 
 count_small_R_1 = sum(map(lambda x : x<0.5, r_sq_list1))
 count_large_R_2 = sum(map(lambda x : x>0.8, r_sq_list2))    
@@ -834,7 +846,7 @@ count_large_R_2 = sum(map(lambda x : x>0.8, r_sq_list2))
 user_list_mob_added = ['resident '+user for user in user_list_mob]
 
 rho_list1=[];rho_list2=[];rho_list3=[];p_val1=[];p_val2=[];p_val3=[];valid_day=[]
-for i in range(len(temp_sensor_derived_steps)):
+for i in range(len(temp_sensor_derived_steps_28days)):
     each_sensor_derived_steps = temp_sensor_derived_steps_28days[i]
     each_mobility = temp_mobility[i]
     each_transition = temp_transition[i]
@@ -857,9 +869,11 @@ spearman_result = pd.DataFrame({'User':user_list_mob_added,'Valid days':valid_da
                                 'rho1 mobility and transition':rho_list1,'p-val 1':p_val1,
                                 'rho2 mobility and median_transition_time':rho_list2,'p-val 2':p_val2,
                                 'rho3 mobility and total_firing':rho_list3,'p-val 3':p_val3})
+# spearman_result.to_excel(r'D:\spearman correlation coefficients M2 is median 28days.xlsx')     
+
 #-----------------------------------
 r_list1=[];r_list2=[];r_list3=[];p_val1=[];p_val2=[];p_val3=[];valid_day=[]
-for i in range(len(temp_sensor_derived_steps)):
+for i in range(len(temp_sensor_derived_steps_28days)):
     each_sensor_derived_steps = temp_sensor_derived_steps_28days[i]
     each_mobility = temp_mobility[i]
     each_transition = temp_transition[i]
@@ -882,13 +896,11 @@ pearson_result = pd.DataFrame({'User':user_list_mob_added,'Valid days':valid_day
                                 'r1 mobility and transition':r_list1,'p-val 1':p_val1,
                                 'r2 mobility and median_transition_time':r_list2,'p-val 2':p_val2,
                                 'r3 mobility and total_firing':r_list3,'p-val 3':p_val3})
-
-pearson_result.to_excel(r'D:\Pearson correlation coefficients M2 is median 28days.xlsx')     
-
+# pearson_result.to_excel(r'D:\Pearson correlation coefficients M2 is median 28days.xlsx')     
 
 
-spearman_result = pd.read_excel(r'D:\dasc individual correlation coefficients median 28 day.xlsx')
-# spearman_result = pd.read_excel(r'D:\dasc correlation coefficients median alldays.xlsx')
+#-----------------------------------
+# spearman_result = pd.read_excel(r'D:\spearman correlation coefficients M2 is median 28days.xlsx')
 spearman_result = spearman_result.sort_values(by=['rho1 mobility and transition'])
 a1 = spearman_result['rho1 mobility and transition'].tolist()
 a2 = spearman_result['rho2 mobility and median_transition_time'].tolist()
@@ -951,8 +963,6 @@ plt.yticks(fontsize=13, family='Times New Roman')
 count_moderate3 = sum(map(lambda x : 0.6<x<0.8, rho_list3))
 count_weak3 = sum(map(lambda x : x<0.6, rho_list3))
 
-avg_valid_day=np.asarray(valid_day).mean()
-avg_valid_day=(np.asarray(valid_day).sum()-29)/46
 
 plt.figure(figsize=(9,6))
 plt.hist(valid_day, bins=10)
@@ -1028,9 +1038,8 @@ def fill_miss_dates_with_nan(case_df_good):
     case_df_good = case_df_good.reindex(datelist, fill_value=float('nan'))
     return case_df_good
 
-case_df_good = create_the_case_df(0,choppedTime)
-case_df_bad = create_the_case_df(42,choppedTime)
-case_df = fill_miss_dates_with_nan(case_df_bad)
+case_df = create_the_case_df(0,choppedTime)
+case_df_fill_nan = fill_miss_dates_with_nan(case_df)
 
 
 def plot_pattern(user_x):
@@ -1074,7 +1083,7 @@ def plot_pattern(user_x):
     plt.ylim(0,)
 
 
-user_x = 20
+user_x = 36
 plot_pattern(user_x)
 print('user PID = ',user_list_mob[user_x])
 
@@ -1094,8 +1103,9 @@ def cumulative_plot(case_df):
     plt.ylabel('accumulative number of transitions')
 
 #-----------------------
-# get linear regression plot
-# m = slope, b=intercept
+# get linear regression plot: m = slope, b=intercept
+index=36
+case_df = create_the_case_df(index,choppedTime)
 m, b = np.polyfit(case_df['mobility'], case_df['num of transition'], 1)
 r_squared1 = r_sq_list1[index]
 m2, b2 = np.polyfit(case_df['mobility'], case_df['total firing'], 1)
@@ -1103,37 +1113,37 @@ r_squared2 = r_sq_list3[index]
 m3, b3 = np.polyfit(case_df['mobility'], case_df['fixed-speed steps'], 1)
 r_squared3 = r_sq_list2[index]
 
-my_font='Times New Roman'
+property_legend = {'size':12,'family':'Times New Roman'}
+label_font_args = dict(fontsize=12, family='Times New Roman')
+axis_font_args = dict(fontsize=12, family='Times New Roman')
 
-plt.figure(figsize =(15,15))
-
+plt.figure(figsize =(9,9))
 plt.subplot(3, 1, 1)
-plt.plot(case_df['mobility'], m*case_df['mobility'] + b,color="r",label='Y={:.2f}X+{:.2f},R-square={:.2f}'.format(m,b,r_squared1))
-plt.legend(loc='lower right', prop = {'size': 20,'family':my_font})
-plt.plot(case_df['mobility'], case_df['num of transition'], '+')
-plt.grid(True,alpha=0.5)
-plt.xticks(fontsize=18, family=my_font);plt.yticks(fontsize=18, family=my_font)
-plt.xlabel('Room Distance Travelled',fontsize = 20,family=my_font)
-plt.ylabel('Freqeuncy of Room Transition',fontsize = 20,family=my_font)
+plt.plot(case_df['mobility'], m*case_df['mobility'] + b,color="#0074ad",label='Y={:.3f}X+{:.3f},R-square={:.3f}'.format(m,b,r_squared1))
+plt.legend(loc='lower right', prop = property_legend)
+plt.plot(case_df['mobility'], case_df['num of transition'], '+',color="#33bcff")
+plt.grid(True,alpha=0.2)
+plt.xticks(**label_font_args);plt.yticks(**label_font_args)
+#plt.xlabel('Travelled sensor distance',**axis_font_args)
+plt.ylabel('M1',**axis_font_args)
  
 plt.subplot(3, 1, 2)
-plt.plot(case_df['mobility'], m2*case_df['mobility'] + b2,color="r",label='Y={:.2f}X+{:.2f},R-square={:.2f}'.format(m2,b2,r_squared2))
-plt.legend(loc='lower right', prop = {'size': 20,'family':my_font})
-plt.plot(case_df['mobility'], case_df['num of transition'], '+')
-plt.grid(True,alpha=0.5)
-plt.xticks(fontsize=18, family=my_font);plt.yticks(fontsize=18, family=my_font)
-plt.xlabel('Room Distance Travelled',fontsize = 20,family=my_font)
-plt.ylabel('Total Firings',fontsize = 20,family=my_font)
+plt.plot(case_df['mobility'], m2*case_df['mobility'] + b2,color="#0074ad",label='Y={:.3f}X+{:.3f},R-square={:.3f}'.format(m2,b2,r_squared2))
+plt.legend(loc='lower right', prop = property_legend)
+plt.plot(case_df['mobility'], case_df['total firing'], '+',color="#33bcff")
+plt.grid(True,alpha=0.2)
+plt.xticks(**label_font_args);plt.yticks(**label_font_args)
+#plt.xlabel('Travelled sensor distance',**axis_font_args)
+plt.ylabel('M2',**axis_font_args)
  
 plt.subplot(3, 1, 3)
-plt.plot(case_df['mobility'],(m3*case_df['mobility'] + b3)/400 ,color="r",label='Y={:.2f}X+{:.2f},R-square={:.2f}'.format(m3,b3,r_squared3))
-plt.legend(loc='lower right', prop = {'size': 20,'family':my_font})
-plt.plot(case_df['mobility'], case_df['num of transition'], '+')
-plt.grid(True,alpha=0.5)
-plt.xticks(fontsize=18, family=my_font);plt.yticks(fontsize=18, family=my_font)
-#plt.yscale('log')
-plt.xlabel('Room Distance Travelled',fontsize = 20,family=my_font)
-plt.ylabel('Fix-speed Mobility',fontsize = 20,family=my_font)
+plt.plot(case_df['mobility'],(m3*case_df['mobility'] + b3) ,color="#0074ad",label='Y={:.3f}X+{:.3f},R-square={:.3f}'.format(m3,b3,r_squared3))
+plt.legend(loc='lower right', prop = property_legend)
+plt.plot(case_df['mobility'], case_df['fixed-speed steps'], '+',color="#33bcff")
+plt.grid(True,alpha=0.2)
+plt.xticks(**label_font_args);plt.yticks(**label_font_args)
+plt.xlabel('Travelled sensor distance',**axis_font_args)
+plt.ylabel('M3',**axis_font_args)
 plt.xtick()
 
 
