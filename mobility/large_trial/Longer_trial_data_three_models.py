@@ -46,26 +46,16 @@ room_distances = pd.DataFrame({})
 for each in reformed_room_matrix_list_temp:
     room_distances = room_distances.append(each)
     
-# the users I suspect
-from matplotlib.ticker import PercentFormatter
-size = []
-for each in reformed_room_matrix_list_temp:
-    size.append(each['distance'].tolist())
-flat_size = [item for sublist in size for item in sublist]
-kwargs = dict(bins=20)
-plt.hist(flat_size, weights =np.ones(len(flat_size))/len(flat_size),**kwargs)
-plt.gca().yaxis.set_major_formatter(PercentFormatter(1))
-plt.xlabel('Room-to-room Distance (Steps)',fontsize=15, family = 'Times New Roman')
-plt.ylabel('Percentage',fontsize=15,family = 'Times New Roman')
-plt.xticks(fontsize=12, family='Times New Roman')
-plt.yticks(fontsize=12, family='Times New Roman')
+# visualize room distances
+kwargs = dict(bins=20,color='#BCC3EB',edgecolor='black', linewidth=1.2)
+label_font_args = dict(fontsize=15, family='Times New Roman')
+axis_font_args = dict(fontsize=20, family='Times New Roman')
+plt.figure(figsize =(8,5))
+plt.hist(room_distances['distance'],**kwargs) 
+plt.xlabel('Sensor-to-sensor distance (step)',**axis_font_args)
+plt.ylabel('Number of sensor distance',**axis_font_args)
+plt.xticks(**label_font_args);plt.yticks(**label_font_args)
 
-
-
-aaa = list(set(reformed_room_matrix_list_temp[27]['distance'].tolist()))
-plt.plot(list(range(len(aaa))),sorted(aaa))
-
-plt.plot([4,6,10,12],[42,56,98,102])
 #############################################################################
 # Load mobility and sensor data
 #############################################################################
@@ -289,7 +279,7 @@ for each_user in sensor_list:
         max_rooms = len(test_user_room_list)
     if len(test_user_room_list) < min_rooms:
         min_rooms = len(test_user_room_list)
-# now we know max_room=10, min_room=6
+# now we know max_room=10, min_room=5
 
 '''
 If we check each PID dataframe, we will realize that some sensors are removed
@@ -695,7 +685,7 @@ ddd = pd.DataFrame({'date':flat_date,'median transition time allDays':flat_senso
 #--------------------------------
 # LONG TIME COMPUTING !! ~ 10 min
 temp_sensor_derived_steps_28days=[]
-for each_user in remove_consecutive_rooms_data:
+for each_user in remove_consecutive_dup_motion_data:
     single_user_transion_time_diff, single_user_transion_time_diff_with_date = get_time_diff_list(each_user,choppedTime)
     # get the avg time diff for this user 
     avg_and_median_time_diff_for_labels_28days = find_avg_time_diff_for_labels_28Days(single_user_transion_time_diff)
@@ -705,9 +695,6 @@ for each_user in remove_consecutive_rooms_data:
 
 flat_sensor_derived_steps_28days = [item for sublist in temp_sensor_derived_steps_28days for item in sublist]
 print('flat_sensor_derived_steps_28days = ', len(flat_sensor_derived_steps_28days))
-eee = pd.DataFrame({'date':flat_date,'median transition time 28Days':flat_sensor_derived_steps_28days})  
-
-
 
 # for debug
 a_temp_sensor_derived_steps=[]
@@ -715,31 +702,6 @@ for fix_speed_mob in temp_sensor_derived_steps_28days:
     a_temp_sensor_derived_steps.append(len(fix_speed_mob))    
 aaa_indices_mob_fixspeed = debugging_two_temp_list_value(a_temp_sensor_derived_steps,a_temp_mobility)
 print('if indices has all TRUE in elements, then bug free')
-
-
-
-each_user = remove_consecutive_rooms_data[33]
-single_user_transion_time_diff, single_user_transion_time_diff_with_date = get_time_diff_list(each_user,choppedTime)
-    # get the avg time diff for this user 
-    avg_and_median_time_diff_for_labels_28days = find_avg_time_diff_for_labels_28Days(single_user_transion_time_diff)
-    # now for this user, every day there is a mobility. In total there are X days mobility
-    this_user_all_the_days = get_daily_sensor_derived_steps_28Days(avg_and_median_time_diff_for_labels_28days,single_user_transion_time_diff_with_date)
-
-
-
-#############################################################################
-# If ground truth mobility have 0 in one day, then sensor_derived step
-# will miss that day, cause its length reduced, so we need to match it with mobility
-#############################################################################
-for i in range(len(temp_mobility)):
-    if len(temp_sensor_derived_steps[i]) == len(temp_mobility[i]):
-        continue
-    if len(temp_sensor_derived_steps[i]) < len(temp_mobility[i]):
-        # find where 0 locate in temp_mobility[i], it could be a list or a value
-        missing_day_0_mobility_index_list = [i for i, x in enumerate(temp_mobility[i]) if x == 0]
-        # add 0 in temp_sensor_derived_steps[i] in front of the value
-        for index in missing_day_0_mobility_index_list:
-            temp_sensor_derived_steps[i].insert(index, 0)
 
 #############################################################################
 # Visualization
@@ -749,15 +711,15 @@ flat_transition = [item for sublist in temp_transition for item in sublist]
 flat_total_firing = [item for sublist in temp_total_triggering for item in sublist]
 flat_sensor_derived_steps_28days = [item for sublist in temp_sensor_derived_steps_28days for item in sublist]
 flat_sensor_derived_steps_28days_hours = [item/3600 for item in flat_sensor_derived_steps_28days]
-flat_sensor_derived_steps = [item for sublist in temp_sensor_derived_steps for item in sublist]
-flat_sensor_derived_steps_hours = [item/3600 for item in flat_sensor_derived_steps]
+#flat_sensor_derived_steps = [item for sublist in temp_sensor_derived_steps for item in sublist]
+#flat_sensor_derived_steps_hours = [item/3600 for item in flat_sensor_derived_steps]
 
 
 # view each parameter distribution
 kwargs = dict(bins=40,color='#BCC3EB',edgecolor='black', linewidth=1.2)
-label_font_args = dict(fontsize=20, family='Times New Roman')
-axis_font_args = dict(fontsize=30, family='Times New Roman')
-plt.figure(figsize =(15,15))
+label_font_args = dict(fontsize=15, family='Times New Roman')
+axis_font_args = dict(fontsize=20, family='Times New Roman')
+plt.figure(figsize =(14,10))
 plt.subplot(2,2,1)
 plt.xlabel('Daily distance travelled (step)',**axis_font_args)
 plt.ylabel('Number of days',**axis_font_args)
@@ -794,7 +756,7 @@ from sklearn.linear_model import LinearRegression
 r_sq_list1=[];intercept_list1=[];coef_list1=[]
 r_sq_list2=[];intercept_list2=[];coef_list2=[]
 r_sq_list3=[];intercept_list3=[];coef_list3=[]
-for i in range(len(temp_sensor_derived_steps)):
+for i in range(len(temp_sensor_derived_steps_28days)):
     each_drived_step = temp_sensor_derived_steps_28days[i]
     each_mobility = temp_mobility[i]
     each_total_trigger = temp_total_triggering[i]
@@ -853,8 +815,8 @@ for i in range(len(temp_sensor_derived_steps_28days)):
     each_total_firing = temp_total_triggering[i]
 
     each_user_rho1,each_user_p_val1 = stats.spearmanr(each_mobility,each_transition)
-    each_user_rho2,each_user_p_val2 = stats.spearmanr(each_mobility,each_sensor_derived_steps)
-    each_user_rho3,each_user_p_val3 = stats.spearmanr(each_mobility,each_total_firing)
+    each_user_rho2,each_user_p_val2 = stats.spearmanr(each_mobility,each_total_firing)
+    each_user_rho3,each_user_p_val3 = stats.spearmanr(each_mobility,each_sensor_derived_steps)
     
     rho_list1.append(each_user_rho1);p_val1.append(each_user_p_val1)
     rho_list2.append(each_user_rho2);p_val2.append(each_user_p_val2)
@@ -865,11 +827,11 @@ rho_list1= [float("{:.3f}".format(each_rho)) for each_rho in rho_list1]
 rho_list2= [float("{:.3f}".format(each_rho)) for each_rho in rho_list2]
 rho_list3= [float("{:.3f}".format(each_rho)) for each_rho in rho_list3]
 
-spearman_result = pd.DataFrame({'User':user_list_mob_added,'Valid days':valid_day,
+spearman_result = pd.DataFrame({'User':user_list_mob,'Valid days':valid_day,
                                 'rho1 mobility and transition':rho_list1,'p-val 1':p_val1,
-                                'rho2 mobility and median_transition_time':rho_list2,'p-val 2':p_val2,
-                                'rho3 mobility and total_firing':rho_list3,'p-val 3':p_val3})
-# spearman_result.to_excel(r'D:\spearman correlation coefficients M2 is median 28days.xlsx')     
+                                'rho2 mobility and total_firing':rho_list2,'p-val 2':p_val2,
+                                'rho3 mobility and median_transition_time':rho_list3,'p-val 3':p_val3})
+# spearman_result.to_excel(r'D:\Sensor_Data_Processing\spearman correlation coefficients median is 28days.xlsx')     
 
 #-----------------------------------
 r_list1=[];r_list2=[];r_list3=[];p_val1=[];p_val2=[];p_val3=[];valid_day=[]
@@ -880,8 +842,8 @@ for i in range(len(temp_sensor_derived_steps_28days)):
     each_total_firing = temp_total_triggering[i]
 
     each_user_r1,each_user_p_val1 = stats.pearsonr(each_mobility,each_transition)
-    each_user_r2,each_user_p_val2 = stats.pearsonr(each_mobility,each_sensor_derived_steps)
-    each_user_r3,each_user_p_val3 = stats.pearsonr(each_mobility,each_total_firing)
+    each_user_r2,each_user_p_val2 = stats.pearsonr(each_mobility,each_total_firing)
+    each_user_r3,each_user_p_val3 = stats.pearsonr(each_mobility,each_sensor_derived_steps)
     
     r_list1.append(each_user_r1);p_val1.append(each_user_p_val1)
     r_list2.append(each_user_r2);p_val2.append(each_user_p_val2)
@@ -892,34 +854,56 @@ r_list1= [float("{:.3f}".format(each_r)) for each_r in r_list1]
 r_list2= [float("{:.3f}".format(each_r)) for each_r in r_list2]
 r_list3= [float("{:.3f}".format(each_r)) for each_r in r_list3]   
 
-pearson_result = pd.DataFrame({'User':user_list_mob_added,'Valid days':valid_day,
+pearson_result = pd.DataFrame({'User':user_list_mob,'Valid days':valid_day,
                                 'r1 mobility and transition':r_list1,'p-val 1':p_val1,
-                                'r2 mobility and median_transition_time':r_list2,'p-val 2':p_val2,
-                                'r3 mobility and total_firing':r_list3,'p-val 3':p_val3})
-# pearson_result.to_excel(r'D:\Pearson correlation coefficients M2 is median 28days.xlsx')     
+                                'r2 mobility and total_firing':r_list2,'p-val 2':p_val2,
+                                'r3 mobility and median_transition_time':r_list3,'p-val 3':p_val3})
+# pearson_result.to_excel(r'D:\Sensor_Data_Processing\pearson correlation coefficients median is 28days.xlsx')     
 
+#====================================================
+# Demographic information for 46 users
+user_paper= pd.read_excel(r'D:\Sensor_Data_Processing\spearman correlation coefficients median is 28days.xlsx')
+user_gender = pd.read_csv(r'D:\Sensor_Data_Processing\gender_label\survey_labels.csv')
+user_gender_paper = user_gender[user_gender['record_id'].isin(user_paper['User'])]
+user_gender_paper = user_gender_paper.merge(user_paper, left_on='record_id', right_on='User', how = 'inner')
+time_list = user_gender_paper["date_of_birth"].values.tolist()
+datetime_list = [dt.datetime.strptime(x, '%Y-%m-%d') for x in time_list]
+age_list = [(dt.datetime.today() - birth_date) // dt.timedelta(days=365.2425) for birth_date in datetime_list]
+user_gender_paper['age'] = age_list 
+user_gender_paper = user_gender_paper.sort_values(by=['record_id']).reset_index()
+user_mental_score = pd.read_csv(r'D:\Sensor_Data_Processing\gender_label\eq5d_and_mood_and_mental_scores.csv')
+user_mental_score_paper = user_mental_score[user_mental_score['PID'].isin(user_gender_paper['record_id'].tolist())]
+user_gender_paper = user_gender_paper.merge(user_mental_score_paper,left_on='record_id',right_on='PID', 
+     how = 'inner')[['record_id', 'living_area', 'home_care_package_level', 'gender',
+                     'age','ATSM','Valid days','rho1 mobility and transition',
+                     'rho2 mobility and total_firing','rho3 mobility and median_transition_time']]
+user_gender_paper['ATSM'] = [int(x) for x in user_gender_paper['ATSM'].tolist()]
 
-#-----------------------------------
-# spearman_result = pd.read_excel(r'D:\spearman correlation coefficients M2 is median 28days.xlsx')
+user_female_paper = user_gender_paper[user_gender_paper['rho3 mobility and median_transition_time']<0.8]
+user_female_paper['age'].describe()
+#====================================================
+# plot three coefficients
 spearman_result = spearman_result.sort_values(by=['rho1 mobility and transition'])
 a1 = spearman_result['rho1 mobility and transition'].tolist()
-a2 = spearman_result['rho2 mobility and median_transition_time'].tolist()
-a3 = spearman_result['rho3 mobility and total_firing'].tolist()
+a2 = spearman_result['rho2 mobility and total_firing'].tolist()
+a3 = spearman_result['rho3 mobility and median_transition_time'].tolist()
 
-pearson_result = pd.read_excel(r'D:\Pearson correlation coefficients M2 is median 28days.xlsx')
 pearson_result = pearson_result.sort_values(by=['r1 mobility and transition'])
 a1_2 = pearson_result['r1 mobility and transition'].tolist()
-a2_2 = pearson_result['r2 mobility and median_transition_time'].tolist()
-a3_2 = pearson_result['r3 mobility and total_firing'].tolist()
+a2_2 = pearson_result['r2 mobility and total_firing'].tolist()
+a3_2 = pearson_result['r3 mobility and median_transition_time'].tolist()
 
-print(np.std(a1))
-print(np.std(a3))
-print(np.std(a2))
-print(np.std(a1_2))
-print(np.std(a3_2))
-print(np.std(a2_2))
+# pearson
+print("{:.3f}".format(np.mean(a1_2)),'±',"{:.3f}".format(np.std(a1_2)))
+print("{:.3f}".format(np.mean(a2_2)),'±',"{:.3f}".format(np.std(a2_2)))
+print("{:.3f}".format(np.mean(a3_2)),'±',"{:.3f}".format(np.std(a3_2)))
 
+# spearman
+print("{:.3f}".format(np.mean(a1)),'±',"{:.3f}".format(np.std(a1)))
+print("{:.3f}".format(np.mean(a2)),'±',"{:.3f}".format(np.std(a2)))
+print("{:.3f}".format(np.mean(a3)),'±',"{:.3f}".format(np.std(a3)))
 
+# visulaization method 1
 label_font_args = dict(fontsize=14, family='Times New Roman')
 axis_font_args = dict(fontsize=20, family='Times New Roman')
 plt.figure(figsize=(12,5))
@@ -941,21 +925,38 @@ plt.legend(prop={"family":"Times New Roman",'size':12})
 plt.xlabel('Individual participants',**axis_font_args)
 plt.ylabel('Spearman coefficient',**axis_font_args)
 
+# visulaization method 2
+pearson_result['M1-M2'] = pearson_result['r1 mobility and transition'] - pearson_result['r2 mobility and total_firing']
+pearson_result['M1-M3'] = pearson_result['r1 mobility and transition'] - pearson_result['r3 mobility and median_transition_time']
+pearson_result = pearson_result.sort_values(by=['User'])
 
+spearman_result['M1-M2'] = spearman_result['rho1 mobility and transition'] - spearman_result['rho2 mobility and total_firing']
+spearman_result['M1-M3'] = spearman_result['rho1 mobility and transition'] - spearman_result['rho3 mobility and median_transition_time']
+spearman_result = spearman_result.sort_values(by=['User'])
 
+label_font_args = dict(fontsize=14, family='Times New Roman')
+axis_font_args = dict(fontsize=20, family='Times New Roman')
 
-plt.figure(figsize=(7,17))
-plt.scatter(spearman_result['Rho1 mobility and transition'],spearman_result.index,label='travelled room distance & room transitions')
-plt.scatter(spearman_result['Rho2 mobility and fixed-speed'],spearman_result.index,label='travelled room distance & fixed-speed mobility')
-plt.scatter(spearman_result['Rho3 mobility and total_firing'],spearman_result.index,label='travelled room distance & total sensor firings')
-plt.grid(axis='both',alpha=0.3)
-plt.xlim([0.2,1])
-plt.legend(loc='upper left',shadow=True,prop={'family':'Times New Roman', 'size':11})
-plt.xlabel('Spearman Correlation Coefficient',fontsize=20, family = 'Times New Roman')
-plt.ylabel('Participants',fontsize=30,family = 'Times New Roman')
-plt.xticks(fontsize=15, family='Times New Roman')
-plt.yticks(fontsize=13, family='Times New Roman')
+plt.figure(figsize =(12,11))
+plt.subplot(2,1,1)
+plt.plot(pearson_result['M1-M2'],label='r (M1) - r (M2)') 
+plt.plot(pearson_result['M1-M3'],label='r (M1) - r (M3)') 
+plt.legend(prop={"family":"Times New Roman",'size':12})
 
+plt.ylabel('Pearson coefficients difference',**axis_font_args)
+plt.xticks(list(range(46)),user_list_mob,rotation=90,fontsize=11, family='Times New Roman');
+plt.yticks(**label_font_args)
+plt.axhline(y=0,linestyle='--',color='black', xmin=0)
+
+plt.subplot(2,1,2)
+plt.plot(spearman_result['M1-M2'],label='\u03C1 (M1) - \u03C1 (M2)') 
+plt.plot(spearman_result['M1-M3'],label='\u03C1 (M1) - \u03C1 (M3)')
+plt.legend(prop={"family":"Times New Roman",'size':12})
+plt.xlabel('Individual participant ID',**axis_font_args)
+plt.ylabel('Spearman coefficients difference',**axis_font_args)
+plt.xticks(list(range(46)),user_list_mob,rotation=90,fontsize=11, family='Times New Roman');
+plt.yticks(**label_font_args)
+plt.axhline(y=0,linestyle='--',color='black', xmin=0)
 
 
 
@@ -964,13 +965,16 @@ count_moderate3 = sum(map(lambda x : 0.6<x<0.8, rho_list3))
 count_weak3 = sum(map(lambda x : x<0.6, rho_list3))
 
 
-plt.figure(figsize=(9,6))
-plt.hist(valid_day, bins=10)
-plt.grid(True,alpha=0.3)
-plt.xlabel('Valid Days',fontsize=30, family = 'Times New Roman')
-plt.ylabel('Frequency',fontsize=30,family = 'Times New Roman')
-plt.xticks(fontsize=20, family='Times New Roman')
-plt.yticks(fontsize=20, family='Times New Roman')
+# visualize 46 people's valid days
+kwargs = dict(bins=7,color='#BCC3EB',edgecolor='black', linewidth=1.2)
+label_font_args = dict(fontsize=15, family='Times New Roman')
+axis_font_args = dict(fontsize=18, family='Times New Roman')
+plt.figure(figsize =(6,4))
+plt.hist(valid_day,**kwargs) 
+plt.xlabel('Trial days',**axis_font_args)
+plt.ylabel('Number of homes',**axis_font_args)
+plt.xticks(**label_font_args);plt.yticks(**label_font_args)
+
 
 #############################################################################
 # Case Study
@@ -1017,7 +1021,7 @@ def get_transition_in_dates(cleaned_ila,choppedTime):
     merged_df = pd.DataFrame({'Day':day,'num of transition':transition})
     return merged_df
 
-# 3-27: index =27, 3-121: index=6
+# 3-1: index =0, 3-5: index=36
 def create_the_case_df(user_index,choppedTime):
     case = finally_sensor_list[user_index]
     case_df = get_transition_in_dates(case,choppedTime)
@@ -1048,8 +1052,8 @@ def plot_pattern(user_x):
     label_font_args = dict(fontsize=12, family='Times New Roman')
     axis_font_args = dict(fontsize=15, family='Times New Roman')
     # set the plot
-    plt.figure(figsize =(15,15))
-    plt.subplot(4, 1, 1)
+    plt.figure(figsize =(12,7))
+    plt.subplot(2, 1, 1)
     plt.plot(case_df.index, case_df['mobility'], c = 'blue')
     plt.grid(alpha=0.2)
     plt.legend(loc='upper left')
@@ -1058,36 +1062,21 @@ def plot_pattern(user_x):
     plt.ylim(0,)
     #plt.xlim(dates[0],dates[-1])
     
-    plt.subplot(4, 1, 2)
+    plt.subplot(2, 1, 2)
     plt.plot(case_df.index, case_df['num of transition'],c = '#66ccff')
     plt.grid(True,alpha=0.2)
     plt.legend(loc='upper left')
     plt.xticks(**label_font_args);plt.yticks(**label_font_args)
     plt.ylabel('Number of room transitions',**axis_font_args)
+    plt.xlabel('Dates',**axis_font_args)
     plt.ylim(0,) 
-    
-    plt.subplot(4, 1, 3)
-    plt.plot(case_df.index, case_df['total firing'], c = '#66ccff')
-    plt.grid(True,alpha=0.2)
-    plt.legend(loc='upper left')
-    plt.xticks(**label_font_args);plt.yticks(**label_font_args)
-    plt.ylabel('Total sensor firings',**axis_font_args)
-    plt.ylim(0,)
-    
-    plt.subplot(4, 1, 4)
-    plt.plot(case_df.index, case_df['fixed-speed steps'],c = '#66ccff')
-    plt.grid(True,alpha=0.2)
-    plt.legend(loc='upper left')
-    plt.xticks(**label_font_args);plt.yticks(**label_font_args)
-    plt.ylabel('Transition duration (hour)',**axis_font_args)
-    plt.ylim(0,)
 
 
-user_x = 36
+user_x = 0
 plot_pattern(user_x)
 print('user PID = ',user_list_mob[user_x])
 
-
+print('\u03C1'+'(M2)')
 #-------------------------
 def cumulative_plot(case_df): 
     # case_df should not have missing days, no nan should included
@@ -1104,60 +1093,37 @@ def cumulative_plot(case_df):
 
 #-----------------------
 # get linear regression plot: m = slope, b=intercept
-index=36
+index=0
 case_df = create_the_case_df(index,choppedTime)
 m, b = np.polyfit(case_df['mobility'], case_df['num of transition'], 1)
 r_squared1 = r_sq_list1[index]
-m2, b2 = np.polyfit(case_df['mobility'], case_df['total firing'], 1)
-r_squared2 = r_sq_list3[index]
-m3, b3 = np.polyfit(case_df['mobility'], case_df['fixed-speed steps'], 1)
-r_squared3 = r_sq_list2[index]
+
 
 property_legend = {'size':12,'family':'Times New Roman'}
 label_font_args = dict(fontsize=12, family='Times New Roman')
-axis_font_args = dict(fontsize=12, family='Times New Roman')
+axis_font_args = dict(fontsize=16, family='Times New Roman')
 
-plt.figure(figsize =(9,9))
-plt.subplot(3, 1, 1)
+plt.figure(figsize =(6,3))
 plt.plot(case_df['mobility'], m*case_df['mobility'] + b,color="#0074ad",label='Y={:.3f}X+{:.3f},R-square={:.3f}'.format(m,b,r_squared1))
 plt.legend(loc='lower right', prop = property_legend)
 plt.plot(case_df['mobility'], case_df['num of transition'], '+',color="#33bcff")
 plt.grid(True,alpha=0.2)
 plt.xticks(**label_font_args);plt.yticks(**label_font_args)
-#plt.xlabel('Travelled sensor distance',**axis_font_args)
-plt.ylabel('M1',**axis_font_args)
- 
-plt.subplot(3, 1, 2)
-plt.plot(case_df['mobility'], m2*case_df['mobility'] + b2,color="#0074ad",label='Y={:.3f}X+{:.3f},R-square={:.3f}'.format(m2,b2,r_squared2))
-plt.legend(loc='lower right', prop = property_legend)
-plt.plot(case_df['mobility'], case_df['total firing'], '+',color="#33bcff")
-plt.grid(True,alpha=0.2)
-plt.xticks(**label_font_args);plt.yticks(**label_font_args)
-#plt.xlabel('Travelled sensor distance',**axis_font_args)
-plt.ylabel('M2',**axis_font_args)
- 
-plt.subplot(3, 1, 3)
-plt.plot(case_df['mobility'],(m3*case_df['mobility'] + b3) ,color="#0074ad",label='Y={:.3f}X+{:.3f},R-square={:.3f}'.format(m3,b3,r_squared3))
-plt.legend(loc='lower right', prop = property_legend)
-plt.plot(case_df['mobility'], case_df['fixed-speed steps'], '+',color="#33bcff")
-plt.grid(True,alpha=0.2)
-plt.xticks(**label_font_args);plt.yticks(**label_font_args)
 plt.xlabel('Travelled sensor distance',**axis_font_args)
-plt.ylabel('M3',**axis_font_args)
-plt.xtick()
+plt.ylabel('M1',**axis_font_args)
 
 
 #############################################################################
 # Paired t test
 #############################################################################
 
-ttest,pval = stats.ttest_rel(a1,a3)
-print('paired t test = ','%.5f' %ttest, ', p-value = ','%.4f' %pval)
-
 ttest,pval = stats.ttest_rel(a1,a2)
 print('paired t test = ','%.5f' %ttest, ', p-value = ','%.4f' %pval)
 
-ttest,pval = stats.ttest_rel(a3,a2)
+ttest,pval = stats.ttest_rel(a1,a3)
+print('paired t test = ','%.5f' %ttest, ', p-value = ','%.4f' %pval)
+
+ttest,pval = stats.ttest_rel(a2,a3)
 print('paired t test = ','%.5f' %ttest, ', p-value = ','%.4f' %pval)
 
 
@@ -1172,15 +1138,15 @@ flat_total_firing = [item for sublist in temp_total_triggering for item in subli
 flat_sensor_derived_steps_28days = [item for sublist in temp_sensor_derived_steps_28days for item in sublist]
 
 
-each_user_rho1,each_user_p_val1 = stats.spearmanr(flat_mobility,flat_transition)
+each_user_rho1,each_user_p_val1 = stats.pearsonr(flat_mobility,flat_transition)
 print('spearmanr all_mobility VS all_num_of_transition rho:',each_user_rho1)
 print('spearmanr all_mobility VS all_num_of_transition p-val',each_user_p_val1)
 
-each_user_rho2,each_user_p_val2 = stats.spearmanr(flat_mobility,flat_sensor_derived_steps_28days)
+each_user_rho2,each_user_p_val2 = stats.pearsonr(flat_mobility,flat_total_firing)
 print('spearmanr all_mobility VS all_fix_speed_step rho:',each_user_rho2)
 print('spearmanr all_mobility VS all_fix_speed_step p-val',each_user_p_val2)
 
-each_user_rho3,each_user_p_val3 = stats.spearmanr(flat_mobility,flat_total_firing)
+each_user_rho3,each_user_p_val3 = stats.pearsonr(flat_mobility,flat_sensor_derived_steps_28days)
 print('spearmanr all_mobility VS all_total_firing rho:',each_user_rho3)
 print('spearmanr all_mobility VS all_total_firing p-val',each_user_p_val3)
 
