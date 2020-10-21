@@ -883,6 +883,9 @@ user_female_paper = user_gender_paper[user_gender_paper['rho3 mobility and media
 user_female_paper['age'].describe()
 #====================================================
 # plot three coefficients
+pearson_result = pd.read_excel(r'D:\Sensor_Data_Processing\pearson correlation coefficients median is 28days.xlsx') 
+spearman_result = pd.read_excel(r'D:\Sensor_Data_Processing\spearman correlation coefficients median is 28days.xlsx') 
+
 # spearman_result = spearman_result.sort_values(by=['rho1 mobility and transition'])
 a1 = spearman_result['rho1 mobility and transition'].tolist()
 a2 = spearman_result['rho2 mobility and total_firing'].tolist()
@@ -892,6 +895,8 @@ a3 = spearman_result['rho3 mobility and median_transition_time'].tolist()
 a1_2 = pearson_result['r1 mobility and transition'].tolist()
 a2_2 = pearson_result['r2 mobility and total_firing'].tolist()
 a3_2 = pearson_result['r3 mobility and median_transition_time'].tolist()
+
+x_label = list(range(1,len(a1)+1))
 
 # pearson
 print("{:.3f}".format(np.mean(a1_2)),'±',"{:.3f}".format(np.std(a1_2)))
@@ -903,20 +908,25 @@ print("{:.3f}".format(np.mean(a1)),'±',"{:.3f}".format(np.std(a1)))
 print("{:.3f}".format(np.mean(a2)),'±',"{:.3f}".format(np.std(a2)))
 print("{:.3f}".format(np.mean(a3)),'±',"{:.3f}".format(np.std(a3)))
 
+# visulaization method 1
 label_font_args = dict(fontsize=12, family='Times New Roman')
 axis_font_args = dict(fontsize=18, family='Times New Roman')
+
 plt.figure(figsize=(10,6))
 plt.subplot(2,1,1)
-plt.plot(a1_2,label='M1',linewidth=4,alpha=0.5, color = 'g' )
-plt.plot(a2_2,label='M2',linestyle='dashed')
-plt.plot(a3_2,label='M3',linestyle='dashed')
+plt.plot(x_label,a1_2,label='M1',linewidth=4,alpha=0.5, color = 'g' )
+plt.plot(x_label,a2_2,label='M2',linestyle='dashed')
+plt.plot(x_label,a3_2,label='M3',linestyle='dashed')
 plt.yticks(**label_font_args)
+plt.xticks(list(range(len(a1))), x_label, rotation='vertical')
 plt.legend(prop={"family":"Times New Roman",'size':12})
 plt.ylabel('Pearson coefficient',**axis_font_args)
 plt.tick_params(
     axis='x',          # changes apply to the x-axis
     which='both',      # both major and minor ticks are affected
-    bottom=False,      # ticks along the bottom edge are off
+    direction ='in',
+    length=4, width=1,
+    bottom=True,      # ticks along the bottom edge are off
     top=False,         # ticks along the top edge are off
     labelbottom=False) # labels along the bottom edge are off
 
@@ -925,15 +935,12 @@ plt.plot(a1,label='M1',linewidth=4,alpha=0.5, color = 'g' )
 plt.plot(a2,label='M2',linestyle='dashed')
 plt.plot(a3,label='M3',linestyle='dashed')
 plt.yticks(**label_font_args)
+plt.xticks(list(range(len(a1))), x_label, rotation='vertical')
 plt.legend(prop={"family":"Times New Roman",'size':12})
 plt.xlabel('Individual participants',**axis_font_args)
 plt.ylabel('Spearman coefficient',**axis_font_args)
-plt.tick_params(
-    axis='x',          # changes apply to the x-axis
-    which='both',      # both major and minor ticks are affected
-    bottom=False,      # ticks along the bottom edge are off
-    top=False,         # ticks along the top edge are off
-    labelbottom=False) # labels along the bottom edge are off
+plt.tick_params(axis='x',which='both',bottom=True,top=False,direction ='in',
+    length=4, width=1,labelbottom=False) 
 
 
 # visulaization method 2
