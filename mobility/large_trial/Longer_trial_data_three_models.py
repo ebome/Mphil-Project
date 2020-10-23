@@ -3,6 +3,7 @@ import pandas as pd
 import datetime as dt
 import numpy as np
 from matplotlib import pyplot as plt
+from matplotlib.pyplot import text
 import copy
 
 #############################################################################
@@ -241,15 +242,12 @@ for i in range(len(cleaned_sensor_list)):
 # Mobility (fixed-distance step, distance travelled): ground truth
 #############################################################################
 # Ground truth mobility, ignore those who have data less than 29 days
-temp_mobility=[];temp_date = []
+temp_mobility=[];
 for each_user_mobility in cleaned_mobility_list:
     aa = each_user_mobility['value'].tolist()
     bb = each_user_mobility['local_timestamp'].tolist()
     temp_mobility.append(aa)
-    temp_date.append(bb)
 flat_mobility = [item for sublist in temp_mobility for item in sublist]
-flat_date = [item for sublist in temp_date for item in sublist]
-aaa = pd.DataFrame({'date':flat_date,'travelled distance':flat_mobility})   
 
 print('flat_mobility = ', len(flat_mobility))
     
@@ -380,8 +378,6 @@ for each_user in finally_sensor_list:
     temp_transition.append(transition) 
 flat_transition = [item for sublist in temp_transition for item in sublist]
 print('flat_transition = ',  len(flat_transition))
-bbb = pd.DataFrame({'date':flat_date,'number of transitions':flat_transition})   
-
 
 
 # for debug
@@ -464,7 +460,6 @@ for each_user_total_firing in all_total_triggering:
     
 flat_total_firing = [item for sublist in temp_total_triggering for item in sublist]
 print('flat_total_firing = ',  len(flat_total_firing))
-ccc = pd.DataFrame({'date':flat_date,'total sensor firings':flat_total_firing})  
 #############################################################################
 # If ground truth mobility have 0 in one day, then total firing
 # will miss that day, cause its length reduced, so we need to match it with mobility
@@ -497,29 +492,10 @@ for i in range(len(cleaned_sensor_list)):
     aaa = remove_consecutive_dup(cleaned_sensor_list[i])
     remove_consecutive_dup_motion_data.append(aaa)
 
-# remove 'Pantry ' and 'Wardrobe 'that may have spaces
-remove_consecutive_rooms_data=[]
-for i in range(len(remove_consecutive_dup_motion_data)):
-    each_matrix_df = reformed_room_matrix_list_temp[i]
-    each_motion_df = remove_consecutive_dup_motion_data[i]
-    # make lower cases of all words to compare
-    # trim each room's leading and trailing spaces
-    matrix_rooms_all = [each_matrix_df['room1_name'].tolist()+each_matrix_df['room2_name'].tolist()]
-    unique_room_names_in_matrix = list(sorted(set([item.strip() for sublist in matrix_rooms_all for item in sublist])))
-    unique_room_names_in_motion = list(sorted(set([each_name.strip() for each_name in each_motion_df['sensor_name'].tolist()])))
-    motion_rooms_not_in_matrix = [elem for elem in unique_room_names_in_motion if elem not in unique_room_names_in_matrix]
-    # as there are unique_room_names_in_motion havinf blank spaces, we cannot use .isin
-    for each_room_not_in_motion in motion_rooms_not_in_matrix:
-        each_motion_df = each_motion_df[~each_motion_df['sensor_name'].str.contains(each_room_not_in_motion)]
-    # aftering removing the unnecessary rooms, change sensor_id
-    each_motion_df = change_sensor_name(each_motion_df)
-    remove_consecutive_rooms_data.append(each_motion_df)
 
 '''
 For each user, the average time from room A to room B(and room B to room A) is constant by assumption.
 (Assume the user is always doing uniform linear motion in a constant speed)
-
-A --> B is a unit, then the reciprocal of avg A--> B time indicates the avg time for this user to complete the unit. 
 '''
 def labelled_room_and_time_diff(cleaned_ila):
     tempDF = pd.DataFrame({})
@@ -670,7 +646,7 @@ def get_daily_sensor_derived_steps_28Days(avg_and_median_time_diff_for_labels, s
 #--------------------------------
 # LONG TIME COMPUTING !! ~ 10 min
 temp_sensor_derived_steps=[]
-for each_user in remove_consecutive_rooms_data:
+for each_user in remove_consecutive_dup_motion_data:
     single_user_transion_time_diff, single_user_transion_time_diff_with_date = get_time_diff_list(each_user,choppedTime)
     # get the avg time diff for this user 
     avg_and_median_time_diff_for_labels = find_avg_time_diff_for_labels(single_user_transion_time_diff)
@@ -680,7 +656,6 @@ for each_user in remove_consecutive_rooms_data:
 
 flat_sensor_derived_steps = [item for sublist in temp_sensor_derived_steps for item in sublist]
 print('flat_sensor_derived_steps = ', len(flat_sensor_derived_steps))
-ddd = pd.DataFrame({'date':flat_date,'median transition time allDays':flat_sensor_derived_steps})  
 
 #--------------------------------
 # LONG TIME COMPUTING !! ~ 10 min
@@ -702,6 +677,164 @@ for fix_speed_mob in temp_sensor_derived_steps_28days:
     a_temp_sensor_derived_steps.append(len(fix_speed_mob))    
 aaa_indices_mob_fixspeed = debugging_two_temp_list_value(a_temp_sensor_derived_steps,a_temp_mobility)
 print('if indices has all TRUE in elements, then bug free')
+
+
+
+
+
+#======================================
+# for seeing difference between 28 day median and all day median
+#======================================
+def get_time_diff_for_one_room_part_A(cleaned_ila,choppedTime):
+    room_num = len(cleaned_ila['changed_sensor_id'].unique().tolist())
+    transition=[];time_diff_list_all_days=[];day=[]
+    for i in range(len(choppedTime)-1):
+        # get daily sensor reading
+        choppedila_day  = cleaned_ila[cleaned_ila['local_timestamp'] > choppedTime[i]]
+        choppedila_day  = choppedila_day[choppedila_day['local_timestamp'] < choppedTime[i+1]]
+        # choppedTime start  4-26, hence sometime the choppedila_day could be length 0
+        if len(choppedila_day)==0:
+            continue
+        # label the transitions and change them to merged transition labels
+        ila_lablled = labelled_room_and_time_diff(choppedila_day)
+        time_diff_list = ila_lablled['time difference'].values.tolist()
+        # get choppedila_day dataframe's date
+        that_day_list = choppedila_day.local_timestamp.tolist()
+        that_day = that_day_list[0][0:10:] # trim datetime hours
+        day.append(that_day)
+
+        if room_num == 3:
+            merge_labelled_ilaList = ms.merge_3_sensors(ila_lablled)
+        if room_num == 4:
+            merge_labelled_ilaList = ms.merge_4_sensors(ila_lablled)
+        if room_num == 5:
+            merge_labelled_ilaList = ms.merge_5_sensors(ila_lablled)
+        if room_num == 6:
+            merge_labelled_ilaList = ms.merge_6_sensors(ila_lablled)
+        if room_num == 7:
+            merge_labelled_ilaList = ms.merge_7_sensors(ila_lablled)
+        if room_num == 8:
+            merge_labelled_ilaList = ms.merge_8_sensors(ila_lablled)
+        if room_num == 9:
+            merge_labelled_ilaList = ms.merge_9_sensors(ila_lablled)
+        if room_num == 10:
+            merge_labelled_ilaList = ms.merge_10_sensors(ila_lablled)
+    
+        # temp has the same length as time_diff_list, they are all for one day
+        time_diff_list_all_days.append(time_diff_list)
+        transition.append(merge_labelled_ilaList)
+    
+    return time_diff_list_all_days,transition,day
+
+def get_time_diff_for_one_room_part_B(time_diff_list_all_days,transition,day,room_str):
+    # now get the index for the room_label
+    one_room_time_diff_by_days=[]
+    for j in range(len(transition)):
+        each_day_s_transition_label = transition[j]
+        indices = []
+        for i in range(len(each_day_s_transition_label)):
+            if each_day_s_transition_label[i] == room_str:
+                indices.append(i)
+        
+        store_list = []
+        each_day_s_time_diff_one_room = time_diff_list_all_days[j]
+        for each_index in indices:
+           store_list.append(each_day_s_time_diff_one_room[each_index])
+           
+        one_room_time_diff_by_days.append(store_list)
+    
+    # make them as dataframe
+    one_room_time_diff_with_date=pd.DataFrame({'Day':day,'one_room_time_diff':one_room_time_diff_by_days})
+    return one_room_time_diff_with_date
+
+
+def get_28day_allday_time_diff(one_user,choppedTime):
+    time_diff_list_all_days,transition,day = get_time_diff_for_one_room_part_A(one_user,choppedTime)
+    # get all room_str from 'transition'
+    flat_transition = [item for sublist in transition for item in sublist]
+    all_room_strs = list(set(flat_transition))
+    # loop all_room_strs
+    time_diff_for_all_room_pair=[]
+    for room_str in all_room_strs:
+        one_room_time_diff_with_date = get_time_diff_for_one_room_part_B(time_diff_list_all_days,transition,day,room_str)
+        flat_one_room_time_diff_28day = [item for sublist in one_room_time_diff_with_date[0:29]['one_room_time_diff'].tolist() for item in sublist]
+        median_28day = np.median(np.asarray(flat_one_room_time_diff_28day))
+        flat_one_room_time_diff_Allday = [item for sublist in one_room_time_diff_with_date['one_room_time_diff'].tolist() for item in sublist]
+        median_Allday = np.median(np.asarray(flat_one_room_time_diff_Allday))
+        time_diff_for_all_room_pair.append(median_Allday-median_28day)
+    return time_diff_for_all_room_pair
+
+#--------------------------------  
+# remove 'Pantry ' and 'Wardrobe 'that may have spaces
+remove_consecutive_rooms_data=[]
+for i in range(len(remove_consecutive_dup_motion_data)):
+    each_matrix_df = reformed_room_matrix_list_temp[i]
+    each_motion_df = remove_consecutive_dup_motion_data[i]
+    # make lower cases of all words to compare
+    # trim each room's leading and trailing spaces
+    matrix_rooms_all = [each_matrix_df['room1_name'].tolist()+each_matrix_df['room2_name'].tolist()]
+    unique_room_names_in_matrix = list(sorted(set([item.strip() for sublist in matrix_rooms_all for item in sublist])))
+    unique_room_names_in_motion = list(sorted(set([each_name.strip() for each_name in each_motion_df['sensor_name'].tolist()])))
+    motion_rooms_not_in_matrix = [elem for elem in unique_room_names_in_motion if elem not in unique_room_names_in_matrix]
+    # as there are unique_room_names_in_motion havinf blank spaces, we cannot use .isin
+    for each_room_not_in_motion in motion_rooms_not_in_matrix:
+        each_motion_df = each_motion_df[~each_motion_df['sensor_name'].str.contains(each_room_not_in_motion)]
+    # aftering removing the unnecessary rooms, change sensor_id
+    each_motion_df = change_sensor_name(each_motion_df)
+    remove_consecutive_rooms_data.append(each_motion_df)
+#--------------------------------  
+all_user_time_diff =[]
+for each_user in remove_consecutive_rooms_data:
+    time_diff_for_all_room_pair = get_28day_allday_time_diff(each_user,choppedTime)
+    all_user_time_diff.append(time_diff_for_all_room_pair)
+
+falt_all_user_time_diff= [item for sublist in all_user_time_diff for item in sublist]
+cleanedList1 = [x for x in falt_all_user_time_diff if str(x) != 'nan']
+plt.hist(cleanedList1,bins=50,color='r')
+cleanedList2 = [x for x in cleanedList1 if abs(x) < 240]
+
+# mean and std
+np.mean(all_user_time_diff[41])
+
+
+plt.figure(figsize=(8,5))
+x = list(range(len(cleanedList1)))
+plt.scatter(x,cleanedList1,c='r',s=10)
+plt.xlabel('room pairs')
+plt.ylabel('transition time difference = median(all days) - median(28 days) (seconds)')
+
+
+#---------------------------------------
+def get_accumulate_avg_time(ploting_data_with_14_lists):
+    indices = list(range(1,len(ploting_data_with_14_lists)+1))
+    print(indices)
+    avg_time_accumulation =[]
+    for x in indices:
+        flat_ploting_data_with_14_lists = [item for sublist in ploting_data_with_14_lists[0:x] for item in sublist]
+        accumulate_avg = np.asarray(flat_ploting_data_with_14_lists).mean()
+        avg_time_accumulation.append(accumulate_avg)
+    return avg_time_accumulation
+
+test_user = remove_consecutive_rooms_data[41]
+time_diff_list_all_days,transition,day = get_time_diff_for_one_room_part_A(test_user,choppedTime)
+room_str = '1 to 2'
+one_room_time_diff_with_date = get_time_diff_for_one_room_part_B(time_diff_list_all_days,transition,day,room_str)
+day_length = 14
+ploting_dates= one_room_time_diff_with_date.iloc[0:day_length+1]['Day'].tolist()
+ploting_data= one_room_time_diff_with_date.iloc[0:day_length+1]['one_room_time_diff'].tolist()
+avg_time_accumulation = get_accumulate_avg_time(ploting_data)
+plt.plot(avg_time_accumulation);plt.xlabel('Days');plt.ylabel('Accumulative mean transiton time for two rooms')
+plt.title(room_str+' transition time accumulative mean plot')
+
+plt.figure(figsize=(10,5))
+for xe, ye in zip(ploting_dates, ploting_data):
+    plt.scatter([xe] * len(ye), ye, s=9, c='r')
+plt.yscale('log')    
+plt.title('user 3-175 '+room_str+' transition time')
+plt.xlabel('First 14 days')
+plt.ylabel('Log(Transition duration (seconds))')
+plt.xticks(list(range(len(ploting_dates))))
+plt.axes().set_xticklabels(ploting_dates,rotation='vertical')
 
 #############################################################################
 # Visualization
@@ -798,10 +931,6 @@ least_square_result = pd.DataFrame({'User':user_list_mob,'a0':intercept_list1,
                                'c1':coef_list3,'R^2 3':r_sq_list3})
 
     
-# count number of R^2 
-count_small_R_1 = sum(map(lambda x : x<0.5, r_sq_list1))
-count_large_R_2 = sum(map(lambda x : x>0.8, r_sq_list2))    
-
 #############################################################################
 # Get spearman correlation
 #############################################################################
@@ -891,6 +1020,8 @@ a1 = spearman_result['rho1 mobility and transition'].tolist()
 a2 = spearman_result['rho2 mobility and total_firing'].tolist()
 a3 = spearman_result['rho3 mobility and median_transition_time'].tolist()
 
+spearman_result['M1-M3'] = spearman_result['rho1 mobility and transition']-spearman_result['rho3 mobility and median_transition_time']
+
 # pearson_result = pearson_result.sort_values(by=['r1 mobility and transition'])
 a1_2 = pearson_result['r1 mobility and transition'].tolist()
 a2_2 = pearson_result['r2 mobility and total_firing'].tolist()
@@ -941,6 +1072,21 @@ plt.xlabel('Individual participants',**axis_font_args)
 plt.ylabel('Spearman coefficient',**axis_font_args)
 plt.tick_params(axis='x',which='both',bottom=True,top=False,direction ='in',
     length=4, width=1,labelbottom=False) 
+
+
+
+
+import pylab as plt
+
+fig, ax = plt.subplots()
+ax.plot([1,2,3],[4,5,6])
+
+labels = [item.get_text() for item in ax.get_xticklabels()]
+
+empty_string_labels = ['']*len(labels)
+ax.set_xticklabels(empty_string_labels)
+
+plt.show()
 
 
 # visulaization method 2
@@ -995,7 +1141,7 @@ plt.xticks(**label_font_args);plt.yticks(**label_font_args)
 
 
 #############################################################################
-# Case Study
+# Case Study: 3-1
 #############################################################################
 # get_transition_arrays will give daily transition numbers
 # if that day does not exist, then it returns 0
@@ -1060,41 +1206,185 @@ def fill_miss_dates_with_nan(case_df_good):
     case_df_good = case_df_good.reindex(datelist, fill_value=float('nan'))
     return case_df_good
 
-case_df = create_the_case_df(0,choppedTime)
+
+
+user_x = 0 # index of user
+case_df = create_the_case_df(user_x,choppedTime)
+case_df_fill_nan = fill_miss_dates_with_nan(case_df)
+
+def remove_extra_mobility_in_absent_day(case_df_fill_nan,start_str,end_str):
+    start = dt.datetime.strptime(start_str, '%Y-%m-%d')
+    end  = dt.datetime.strptime(end_str, '%Y-%m-%d') 
+    period_len = (end - start).days+1
+    datelist = pd.date_range(start, periods = period_len).tolist()
+    case_df_fill_nan.loc[datelist[0]:datelist[-1],'num of transition':'total firing']= float('nan')
+    return case_df_fill_nan
+
+case_df_fill_nan = remove_extra_mobility_in_absent_day(case_df_fill_nan,'2019-07-30','2019-08-12')
+case_df_fill_nan = remove_extra_mobility_in_absent_day(case_df_fill_nan,'2019-08-16','2019-08-19')
+case_df_fill_nan = remove_extra_mobility_in_absent_day(case_df_fill_nan,'2020-03-08','2020-03-20')
+case_df_fill_nan = remove_extra_mobility_in_absent_day(case_df_fill_nan,'2019-12-22','2019-12-26')
+ 
+# add dummy 0 and 1 for easier plotting
+case_df_fill_nan['before_surgery']=0
+surgery_start  = dt.datetime.strptime('2019-07-29', '%Y-%m-%d') 
+case_df_fill_nan.loc[case_df_fill_nan.index <=surgery_start,'before_surgery']=1
+
+case_df_fill_nan['after_surgery']=0
+surgery_end = dt.datetime.strptime('2019-08-20', '%Y-%m-%d')
+holiday_start = dt.datetime.strptime('2019-12-31', '%Y-%m-%d')
+case_df_fill_nan.loc[surgery_end:holiday_start,'after_surgery']=1
+
+
+# keep the dates to 2019-12-31
+case_df_fill_nan_last_yr = case_df_fill_nan[case_df_fill_nan.index <= dt.datetime.strptime('2019-12-30', '%Y-%m-%d')]
+
+# case_df_fill_nan_last_yr = pd.read_excel(r'D:\Sensor_Data_Processing\3_1_user_case_data.xlsx')
+
+#=========================================================
+# set the plot
+label_font_args = dict(fontsize=14, family='Times New Roman')
+axis_font_args = dict(fontsize=18, family='Times New Roman')
+
+plt.figure(figsize =(10,7))
+
+plt.plot(case_df_fill_nan_last_yr.index, case_df_fill_nan_last_yr['num of transition'],c = '#6178ff')
+plt.xticks(**label_font_args);plt.yticks(**label_font_args)
+plt.ylabel('M1: number of transitions',**axis_font_args)
+#plt.xlabel('Dates',**axis_font_args)
+plt.ylim(0,) 
+# add dates and reason
+xposition_holiday = pd.DatetimeIndex(['2019-06-29','2019-07-05','2019-12-22','2019-12-26'])
+for xc in xposition_holiday:
+    plt.axvline(x=xc, color='k', linestyle='--',lw=1)
+for i, x in enumerate(xposition_holiday):
+    text(x, 82,'holiday', rotation=90, verticalalignment='bottom',ha='left',color='k',family='Times New Roman', size=12)
+
+
+xposition_surgery = pd.DatetimeIndex(['2019-07-29','2019-08-13'])
+for xc in xposition_surgery:
+    plt.axvline(x=xc, color='r', linestyle='--',lw=1)
+for i, x in enumerate(xposition_surgery):
+    text(x,70,'knee surgery', rotation=90, verticalalignment ='bottom',ha='right',color='r',family='Times New Roman', size=12)
+
+xposition_pneumonia = pd.DatetimeIndex(['2019-08-15','2019-08-20'])
+for xc in xposition_pneumonia:
+    plt.axvline(x=xc, color='b', linestyle='--',lw=1)
+for i, x in enumerate(xposition_pneumonia):
+    text(x, 76,'pneumonia', rotation=90, verticalalignment='bottom',ha='left',color='b',family='Times New Roman', size=12)
+
+#=========================================================
+# add trend line
+#-----------------------------------
+# do regression model before surgery
+start = dt.datetime.strptime('2019-04-29', '%Y-%m-%d')
+end  = dt.datetime.strptime('2019-07-29', '%Y-%m-%d') 
+y_before_surgery = case_df_fill_nan.loc[start:end,'num of transition'].tolist()
+y_before_surgery_remove_nan =[x for x in y_before_surgery if str(x) != 'nan']
+x = list(range(len(y_before_surgery_remove_nan)))
+m_before_surgery, b_before_surgery = np.polyfit(x, y_before_surgery_remove_nan, 1)
+# get the x for plotting use, this plotting x can skip the Nan values
+plotting_x_before_surgery = list(range(0,len(case_df_fill_nan[case_df_fill_nan['before_surgery']==1])))
+# get the y values for plotting use
+y_before_surgery = m_before_surgery*np.array(plotting_x_before_surgery)+b_before_surgery
+# from case dataframe,get the dates
+x_before_surgery = case_df_fill_nan[case_df_fill_nan['before_surgery']==1].index
+
+mean_before = np.mean(y_before_surgery_remove_nan)
+
+
+
+# do regression model after surgery until holiday
+start = dt.datetime.strptime('2019-08-20', '%Y-%m-%d')
+end  = dt.datetime.strptime('2019-12-30', '%Y-%m-%d') 
+y_after_surgery = case_df_fill_nan.loc[start:end,'num of transition'].tolist()
+y_after_surgery_remove_nan =[x for x in y_after_surgery if str(x) != 'nan']
+x = list(range(len(y_after_surgery_remove_nan)))
+m_after_surgery, b_after_surgery = np.polyfit(x, y_after_surgery_remove_nan, 1)
+position_start = case_df_fill_nan['after_surgery'].tolist().index(1)
+plotting_x_after_surgery = list(range(position_start,position_start+len(case_df_fill_nan[case_df_fill_nan['after_surgery']==1])))
+y_after_surgery = m_after_surgery*np.array(plotting_x_after_surgery)+b_after_surgery
+# from case dataframe,get the dates
+x_after_surgery = case_df_fill_nan[case_df_fill_nan['after_surgery']==1].index
+
+mean_after = np.mean(y_after_surgery_remove_nan)
+
+
+#-----------------------------------
+# set the plot
+label_font_args = dict(fontsize=14, family='Times New Roman')
+axis_font_args = dict(fontsize=18, family='Times New Roman')
+property_legend = {'size':12,'family':'Times New Roman'}
+
+plt.figure(figsize =(11,4))
+plt.plot(case_df_fill_nan_last_yr.index, case_df_fill_nan_last_yr['num of transition'],c = '#6178ff')
+
+plt.hlines(y=mean_before, xmin=x_before_surgery[0], xmax=x_before_surgery[-1], 
+           label ='Mean before surgery: {:.2f}'.format(mean_before),color='b',ls='--')
+
+plt.hlines(y=mean_after, xmin=x_after_surgery[0], xmax=x_after_surgery[-1], 
+           label ='Mean after surgery: {:.2f}'.format(mean_after),color='c',ls='--')
+plt.legend(loc='upper left',prop=property_legend)       
+         
+plt.xticks(**label_font_args);plt.yticks(**label_font_args)
+plt.ylabel('M1: number of transitions',**axis_font_args)
+plt.xlabel('Dates',**axis_font_args)
+plt.ylim(0,) 
+# add dates and reason
+xposition_holiday = pd.DatetimeIndex(['2019-07-29','2019-08-20'])
+for xc in xposition_holiday:
+    plt.axvline(x=xc, color='k', linestyle='--',lw=1)
+plt.text(pd.DatetimeIndex(['2019-08-05']), 10, 'Knee surgery in hospital',rotation=90,family='Times New Roman', size=18)
+
+
+
+'''
+xposition_holiday = pd.DatetimeIndex(['2019-06-29','2019-07-05','2019-12-22','2019-12-26'])
+for xc in xposition_holiday:
+    plt.axvline(x=xc, color='k', linestyle='--',lw=1)
+
+text(xposition_holiday[1], 82,'holiday', rotation=90, verticalalignment='bottom',ha='left',color='k',family='Times New Roman', size=14)
+text(xposition_holiday[-1], 82,'holiday', rotation=90, verticalalignment='bottom',ha='left',color='k',family='Times New Roman', size=14)
+'''
+
+#############################################################################
+# Case Study: 3-5
+#############################################################################
+user_x = 36 # index of user
+case_df = create_the_case_df(user_x,choppedTime)
 case_df_fill_nan = fill_miss_dates_with_nan(case_df)
 
 
-def plot_pattern(user_x):
-    case_df_bad = create_the_case_df(user_x,choppedTime)
-    case_df = fill_miss_dates_with_nan(case_df_bad)
-    label_font_args = dict(fontsize=12, family='Times New Roman')
-    axis_font_args = dict(fontsize=15, family='Times New Roman')
-    # set the plot
-    plt.figure(figsize =(12,7))
-    plt.subplot(2, 1, 1)
-    plt.plot(case_df.index, case_df['mobility'], c = 'blue')
-    plt.grid(alpha=0.2)
-    plt.legend(loc='upper left')
-    plt.xticks(**label_font_args);plt.yticks(**label_font_args)
-    plt.ylabel('Daily distance travelled (step)',**axis_font_args)
-    plt.ylim(0,)
-    #plt.xlim(dates[0],dates[-1])
-    
-    plt.subplot(2, 1, 2)
-    plt.plot(case_df.index, case_df['num of transition'],c = '#66ccff')
-    plt.grid(True,alpha=0.2)
-    plt.legend(loc='upper left')
-    plt.xticks(**label_font_args);plt.yticks(**label_font_args)
-    plt.ylabel('Number of room transitions',**axis_font_args)
-    plt.xlabel('Dates',**axis_font_args)
-    plt.ylim(0,) 
+#case_df_fill_nan = pd.read_excel(r'D:\Sensor_Data_Processing\3_5_all_days_data.xlsx')
+#case_df_fill_nan = case_df_fill_nan.set_index('Day')
+
+# remove previous days
+case_df_fill_nan = case_df_fill_nan[case_df_fill_nan.index >=dt.datetime.strptime('2019-12-31', '%Y-%m-%d')]
 
 
-user_x = 0
-plot_pattern(user_x)
-print('user PID = ',user_list_mob[user_x])
+label_font_args = dict(fontsize=14, family='Times New Roman')
+axis_font_args = dict(fontsize=18, family='Times New Roman')
+property_legend = {'size':12,'family':'Times New Roman'}
 
-print('\u03C1'+'(M2)')
+
+plt.figure(figsize =(11,4))
+plt.plot(case_df_fill_nan.index, case_df_fill_nan['num of transition'],label = 'M1',c = '#6178ff')
+plt.plot(case_df_fill_nan['num of transition'].rolling(3).mean(),label = '3-day moving average',c = '#ff7824',linestyle='dashed')
+
+plt.xticks(**label_font_args);plt.yticks(**label_font_args)
+plt.ylabel('M1: number of transitions',**axis_font_args)
+plt.xlabel('Dates',**axis_font_args)
+plt.ylim(0,) 
+plt.legend(loc='lower center',prop=property_legend)       
+
+xposition_holiday = pd.DatetimeIndex(['2020-01-29','2020-04-12'])
+for xc in xposition_holiday:
+    plt.axvline(x=xc, color='k', linestyle='--',lw=1)
+
+text(xposition_holiday[0], 18,'First case in local State', rotation=90, verticalalignment='bottom',ha='left',color='k',family='Times New Roman', size=14)
+text(xposition_holiday[1], 14,'Daily cases dropped to 21', rotation=90, verticalalignment='bottom',ha='left',color='k',family='Times New Roman', size=14)
+
+
 #-------------------------
 def cumulative_plot(case_df): 
     # case_df should not have missing days, no nan should included
