@@ -203,14 +203,18 @@ def one_sleep_para_mean_median(period_start,period_end,temp_sleep_duration, slee
     for test in temp_sleep_duration:
         test = test.loc[(test['date'] > period_start) & (test['date'] <= period_end)]
         if len(test)>20:
-            mean = np.around( np.mean(test[sleep_para]) , decimals=4) 
+            mean_no_std = np.around( np.mean(test[sleep_para]) , decimals=4)
+            std = np.around( np.std(test[sleep_para]) , decimals=4)
+            mean = str(mean_no_std)+'±'+str(std)
             median = np.around( np.median(test[sleep_para]) , decimals=4) 
             minimal = np.around( np.min(test[sleep_para]) , decimals=4)
             maximal = np.around( np.max(test[sleep_para]) , decimals=4)
             CI_95_low = np.around(np.percentile(test[sleep_para],2.5), decimals=4) 
             CI_95_high = np.around(np.percentile(test[sleep_para],97.5), decimals=4) 
         elif len(test)<=20 and len(test) > 0:
-            mean = str(  np.around( np.mean(test[sleep_para]) , decimals=4)  )+' *'
+            mean_no_std = np.around( np.mean(test[sleep_para]) , decimals=4)
+            std = np.around( np.std(test[sleep_para]) , decimals=4)
+            mean = str(mean_no_std)+'±'+str(std)+' *'
             median = str( np.around( np.median(test[sleep_para]) , decimals=4)  )+' *'
             minimal = str( np.around( np.min(test[sleep_para]) , decimals=4)  )+' *'
             maximal = str( np.around( np.max(test[sleep_para]) , decimals=4)  )+' *'
@@ -222,8 +226,7 @@ def one_sleep_para_mean_median(period_start,period_end,temp_sleep_duration, slee
             minimal = np.nan
             maximal = np.nan
             CI_95_low = np.nan
-            CI_95_high = np.nan
-            
+            CI_95_high = np.nan            
         this_user_this_period = pd.DataFrame({'mean':mean,'median':median,'min':minimal,'max':maximal,
                                               '95%_CI_lower':CI_95_low,'95%_CI_upper':CI_95_high}, index=[0])
         all_users_this_period = pd.concat([all_users_this_period,this_user_this_period], ignore_index=True)
