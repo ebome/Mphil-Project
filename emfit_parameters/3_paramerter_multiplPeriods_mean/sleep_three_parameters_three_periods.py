@@ -11,7 +11,7 @@ from datetime import timedelta
 mydb = mysql.connector.connect(user ='root', password ='123456')
 mycursor = mydb.cursor()
 # approximately 3 min to finish loading 5 million lines
-dacs_all_sleep = pd.read_sql("SELECT * FROM dacs_all_data.dacs_sleep_data_with_id;", con=mydb)
+dacs_all_sleep = pd.read_sql("SELECT * FROM dacs_all_data.sleep_data_up_to_nov;", con=mydb)
 mycursor.close()
 mydb.close()
 
@@ -20,7 +20,12 @@ dacs_all_sleep['end_date']=pd.to_datetime(dacs_all_sleep['end_date'])
 # add 'sleep efficiency' column
 dacs_all_sleep['sleep_efficiency']=dacs_all_sleep['sleep_duration']/dacs_all_sleep['bed_duration']
 # clean some useless columns
-dacs_all_sleep = dacs_all_sleep.drop(['sleep_data_id','end_time'], axis=1)
+dacs_all_sleep = dacs_all_sleep.drop(['sleep_data_id','room_id','sensor_type','sensor_udn',
+                                      'sensor_name','sensor_id','device_id','session_id'], axis=1)
+
+# change 'rebaseline' in PID for 3-175, 3-183
+dacs_all_sleep['PID'] = [x.replace(' Rebaseline','') for x in dacs_all_sleep['PID']]
+
 
 # count the number of PID and see how many days of data each PID has
 output = dacs_all_sleep.groupby('PID').size()
@@ -36,16 +41,6 @@ each_user_sleep_days = dacs_all_sleep.groupby('PID').size()
 ###################################################
 solitary_list_intervention_group = pd.read_excel(r'D:\Sensor_Data_Processing\DACS_users_live_alone.xlsx')
 
-# for people live with others, get the number of people
-non_solitray_residents = solitary_list_intervention_group[solitary_list_intervention_group['living_arrangments']!=1]
-non_solitray_residents = non_solitray_residents.dropna()
-non_solitray_residents = non_solitray_residents[non_solitray_residents['ATSM score']!='missing items']
-non_solitray_residents = non_solitray_residents[non_solitray_residents['randomised_group']==1]
-non_solitary_users = non_solitray_residents['record_id'].tolist()
-non_solitary_dacs_sleep = dacs_all_sleep[dacs_all_sleep['PID'].isin(non_solitary_users)]
-non_solitary_sleep_pid = non_solitary_dacs_sleep['PID'].unique().tolist()
-
-
 # make sure they live alone
 solitary_list_intervention_group = solitary_list_intervention_group[solitary_list_intervention_group['living_arrangments']==1]
 # make sure they have sensor installed in home
@@ -57,10 +52,8 @@ solitary_dacs_sleep = dacs_all_sleep[dacs_all_sleep['PID'].isin(solitary_users)]
 sleep_pid = solitary_dacs_sleep['PID'].unique().tolist()
 
 ###################################################
-# Group sleep sensor
+# Group sleep sensor: 44 solitary users
 ###################################################
-# get users in sleep data
-
 # NOTE: use solitary_dacs_sleep or non_solitary_dacs_sleep in line 65 changes all result below
 sleep_grouped_list = list(solitary_dacs_sleep.groupby(['PID']))
 reformed_sleep_list_temp=[]
@@ -163,7 +156,32 @@ for each_user_sleep in reformed_sleep_no_repetitive:
 aaa=[]
 for each_user_sleep in reformed_sleep_final:
     each_user_sleep = each_user_sleep.dropna(subset=['sleep_duration'])
-    aaa.append(each_user_sleep)
+    aaa.append(each_user_sleep) 
+    
+    
+#----------------------
+# to CSV files
+bbb=[]
+for each_user_sleep in reformed_sleep_final:
+    each_user_sleep = each_user_sleep.dropna(subset=['sleep_duration'])
+    each_user_sleep = each_user_sleep.drop(columns=['session_id', 'date_for_this_sleep','new_date_for_this_sleep'])
+    bbb.append(each_user_sleep)
+
+path = r'D:/44_single_sleeper'
+
+users_list=[]
+for each in bbb:
+    users_list.append(each['PID'].tolist()[0])
+
+csv_file_list = []
+for each_user_str in users_list:
+    each_csv_name = path+'/'+each_user_str+'.csv'
+    csv_file_list.append(each_csv_name)
+
+for i in range(len(csv_file_list)):
+    bbb[i].to_csv(csv_file_list[i],index=False)
+    
+    
 
 #############################################################################
 # Sleep parameter selection
@@ -278,18 +296,21 @@ user_gender['ATSM'] = [int(x) for x in user_gender['ATSM'].tolist()]
 #############################################################################
 # map sleep median and mean with user_gender
 #############################################################################
-df = df_concat_TST.merge(df_concat_WASO, how="inner", left_index=True, right_index=True)
-df = df.merge(df_concat_SE, how="inner", left_index=True, right_index=True)
+#df = df_concat_TST.merge(df_concat_WASO, how="inner", left_index=True, right_index=True)
+#df = df.merge(df_concat_SE, how="inner", left_index=True, right_index=True)
 # add mental score
+df=df_concat_SE
+
 df = df[df.index.isin(user_gender['record_id'].tolist())]
 
 # add ATSM score
 user_gender_atsm_score = user_gender[['record_id','ATSM','age','gender']]
 joined_table = df.merge(user_gender_atsm_score,left_on=df.index,right_on='record_id', 
      how = 'inner')
+joined_table = joined_table.rename({'ATSM': 'mental_score'}, axis=1)  
 
 # write table to excel
-joined_table.to_excel(r'D:\solitary_44_sleepers.xlsx')
+joined_table.to_excel(r'D:\solitray_44_sleepers\se.xlsx',index=False)
 
 
 #############################################################################
@@ -357,4 +378,3 @@ plot_SE_for_one_age_group(joined_table_70s_half_B,'Sleepers in their 70s')
 plot_SE_for_one_age_group(joined_table_80s_half_A,'Sleepers in their 80s')
 plot_SE_for_one_age_group(joined_table_80s_half_B,'Sleepers in their 80s')
 plot_SE_for_one_age_group(joined_table_90s,'Sleepers in their 90s')
-
