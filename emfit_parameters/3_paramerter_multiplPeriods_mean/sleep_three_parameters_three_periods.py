@@ -378,3 +378,4 @@ plot_SE_for_one_age_group(joined_table_70s_half_B,'Sleepers in their 70s')
 plot_SE_for_one_age_group(joined_table_80s_half_A,'Sleepers in their 80s')
 plot_SE_for_one_age_group(joined_table_80s_half_B,'Sleepers in their 80s')
 plot_SE_for_one_age_group(joined_table_90s,'Sleepers in their 90s')
+
