@@ -3,7 +3,6 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import datetime as dt
 import mysql.connector
-from datetime import timedelta
 
 ###################################################
 # Sleep summary data: Fetch from local database
@@ -60,117 +59,145 @@ reformed_sleep_list_temp=[]
 for each_PID in sleep_grouped_list:
     reformed_sleep_list_temp.append(each_PID[1])
   
-
 #############################################################################
 # Remove repetitive dates of sleep recording 
 #############################################################################
-def get_masked_dataframe(start_date, end_date, df):
-    mask = (df['start_date']>= start_date) & (df['start_date'] < end_date)
-    new_df = df.loc[mask]
-    return new_df
- 
+# follow Mahnoosh's suggestion in one user
+# split day-by-day, but not from 0am. Instead, split each day from 7pm 
+base = dt.datetime.strptime('2019-05-02 19:00:00', '%Y-%m-%d %H:%M:%S')
+datelist = pd.date_range(base, periods=580).tolist()
+choppedTime=[]
+for elt in datelist:
+    strg = f'{elt:%Y-%m-%d %H:%M:%S}'
+    choppedTime.append(strg)
+    
+#-----------------------------------------------------
+# split the sleep data day-by-day
 
-reformed_sleep_list_with_no_repetitive = [];
-for each_user_sleep_df in reformed_sleep_list_temp:
-    cleaned_this_user = pd.DataFrame({}) 
-    sleep_date_list = each_user_sleep_df['start_date'].tolist()
-    slice_windows = pd.date_range(sleep_date_list[0], periods=500, freq='1D').tolist()
-    for i in range(len(slice_windows)-1):
-        start_date = slice_windows[i]
-        end_date = slice_windows[i+1]
-        only_user_one_day_df = get_masked_dataframe(start_date, end_date, each_user_sleep_df)
-        if only_user_one_day_df.empty == False:
-            # keep the longest sleep duration in record
-            only_user_one_day_df = only_user_one_day_df.fillna(method='ffill')
-            only_user_one_day_cleaned = only_user_one_day_df.sort_values('sleep_duration').drop_duplicates(['PID'], keep='last')
-            cleaned_this_user = pd.concat([cleaned_this_user,only_user_one_day_cleaned])
-    reformed_sleep_list_with_no_repetitive.append(cleaned_this_user)
+def keep_record_in_interval(one_day_sleep, start_time):
+    # sort the dataframe based on start_date
+    one_day_sleep = one_day_sleep.sort_values(by='start_date')
+    # the start_time is sure to started at 7pm, but the start_time can also up to 6am
+    # i.e. 11 hours from 7pm-6am
+    last_of_start_time = start_time + dt.timedelta(hours=11)
+    last_of_start_time = last_of_start_time.strftime('%Y-%m-%d %H:%M:%S')
+    one_day_sleep = one_day_sleep[one_day_sleep['start_date'] < last_of_start_time]
+    return one_day_sleep
 
-# There will be reocrds in same day indicate daytime nap, 
-# so if start and end day are same, and remove
+def keep_longest_tst_in_episode(one_day_sleep):
+    # group the start_date with same values, and keep the longest sleep_duration
+    sleep_episodes_list = []
+    sleep_episode_grouped_list = list(one_day_sleep.groupby(['start_date']))
+    for each_sleep in sleep_episode_grouped_list:
+        each_same_start_episode = each_sleep[1]
+        one_episode = each_same_start_episode.sort_values('sleep_duration').drop_duplicates(['PID'], keep='last')
+        sleep_episodes_list.append(one_episode)
+    return sleep_episodes_list
+
+def obtain_summary(sleep_episodes_list):
+    # flat the sleep_episodes_list into a big dataframe, and get SOL, bed_exit_duration
+    final_big_df = pd.DataFrame({})    
+    for each_epi in sleep_episodes_list:
+        final_big_df = pd.concat([final_big_df,each_epi])
+    
+    final_big_df = final_big_df.sort_values('start_date')
+    PID = final_big_df['PID'].tolist()[0]
+    SOL = (final_big_df['sleep_onset_duration'].tolist()[0])/60
+    start_sleep_time = final_big_df['start_date'].tolist()[0]
+    finish_sleep_time = final_big_df['end_date'].tolist()[-1]
+    start_timestamp = final_big_df['start_time'].tolist()[0]
+    end_timestamp = final_big_df['end_time'].tolist()[0]
+    TST = final_big_df['sleep_duration'].sum()
+    WASO = final_big_df['awake_duration'].sum()
+    duraion_in_bed = final_big_df['bed_duration'].sum()
+    sleep_efficiency = TST/duraion_in_bed
+    toss_turn_count = final_big_df['toss_turn_count'].sum()
+    awake_count = final_big_df['awakenings'].sum()
+    bed_exit_count = final_big_df['bed_exit_count'].sum()
+    bed_exit_count = bed_exit_count + (len(sleep_episodes_list)-1)
+    avg_hr = final_big_df['average_heart_rate'].sum()
+    avg_hr = avg_hr/len(sleep_episodes_list)
+    avg_rr = final_big_df['average_respiration_rate'].sum()
+    avg_rr = avg_rr/len(sleep_episodes_list)
+    TST = TST/3600; WASO=WASO/60
+    
+    # ∑ time difference in each episodes, and add the sigma to bed_exit_duration
+    inter_episode_bed_exit_duration=0
+    for i in range(len(sleep_episodes_list)-1):
+        e1_end = sleep_episodes_list[i]['end_time'].tolist()[0]
+        e2_start = sleep_episodes_list[i+1]['start_time'].tolist()[0]
+        timestamp_diff_e2_e1 = e2_start - e1_end # unit:seconds
+        inter_episode_bed_exit_duration = inter_episode_bed_exit_duration + timestamp_diff_e2_e1
+    bed_exit_duration = final_big_df['bed_exit_duration'].sum()
+    bed_exit_duration = (bed_exit_duration+inter_episode_bed_exit_duration)/60
+
+
+    return pd.DataFrame({'PID':PID,'start_sleep_time':start_sleep_time,
+                         'finish_sleep_time':finish_sleep_time,
+                         'start_timestamp':start_timestamp,
+                         'end_timestamp':end_timestamp,
+                         'TST(hour)':TST, 'WASO(min)':WASO,'SOL(min)':SOL,
+                         'SE':sleep_efficiency,'toss_turn_count':toss_turn_count,
+                         'avg_hr':avg_hr,'avg_rr':avg_rr,'awake_count':awake_count,
+                         'bed_exit_count':bed_exit_count,
+                         'bed_exit_duration(min)':bed_exit_duration}, index=[0])
+
+    
+# NOTE: we should use start_date ALL THE TIME, since end_date is not necessary
+def get_one_user_sleep_data(test_user,choppedTime):
+
+    first_date_in_this_user = test_user['start_date'].tolist()[0]
+    last_date_in_this_user = test_user['start_date'].tolist()[-1]
+
+    sleep_summary_one_person = pd.DataFrame({})
+    for i in range(len(choppedTime)-1):
+        one_day_sleep  = test_user[test_user['start_date'] > choppedTime[i]]
+        one_day_sleep  = one_day_sleep[one_day_sleep['start_date'] < choppedTime[i+1]]
+               
+        # e.g. choppedTime start  4-26, hence the choppedila_day is length 0 before the start date
+        if first_date_in_this_user > datelist[i+1] or last_date_in_this_user < datelist[i]:
+            continue    
+        if len(one_day_sleep)==0:
+            continue
+
+        # one_day_sleep is the records for this day, now 
+        # 1. remove the start_date that not within 7pm-6am
+        # 2. for the rest episodes, check if they have same start time
+        start_time = dt.datetime.strptime(choppedTime[i],'%Y-%m-%d %H:%M:%S')
+        one_day_sleep_with_episodes = keep_record_in_interval(one_day_sleep, start_time)
+        if len(one_day_sleep_with_episodes)==0:
+            continue
+    
+        sleep_episodes_list = keep_longest_tst_in_episode(one_day_sleep_with_episodes)
+
+        # now for each episode in sleep_episodes_list, process each parameter
+        daily_summary = obtain_summary(sleep_episodes_list)    
+        sleep_summary_one_person = pd.concat([sleep_summary_one_person,daily_summary])
+        abab = sleep_summary_one_person.reset_index().drop(columns=['index'])
+
+    return abab
+
+#------------------
+#test_user = reformed_sleep_list_temp[18]
+#test_user = test_user.dropna(subset=['sleep_duration'])
+#sleep_summary_one_person = get_one_user_sleep_data(test_user,choppedTime)
+
+#------------------
 reformed_sleep_list_no_nap = []
-for each_user_sleep in reformed_sleep_list_with_no_repetitive:
-    removed_sleep_days = pd.DataFrame({})
-    start_dates = [each_day.date() for each_day in each_user_sleep['start_date'].tolist()] 
-    end_dates = [each_day.date() for each_day in each_user_sleep['end_date'].tolist()]    
-    start_hours = [each_day.time() for each_day in each_user_sleep['start_date'].tolist()] 
-    sleep_duration = [each_duration/3600 for each_duration in each_user_sleep['sleep_duration'].tolist()]
-    nap_time_ends = dt.time(17,0,0);    nap_time_starts = dt.time(7,0,0)
-
-
-    index_list = each_user_sleep.index.tolist()
-    for i in range(len(start_dates)):
-        if start_dates[i]==end_dates[i] and sleep_duration[i] < 3:
-            index = index_list[i]
-            removed = each_user_sleep.loc[index]
-            removed_sleep_days = removed_sleep_days.append(removed)
+for test_user in reformed_sleep_list_temp:
+    # drop rows with nan sleep_duration
+    test_user = test_user.dropna(subset=['sleep_duration'])
+    sleep_summary_one_person = get_one_user_sleep_data(test_user,choppedTime)
+    reformed_sleep_list_no_nap.append(sleep_summary_one_person)
     
-    each_user_sleep = each_user_sleep[~each_user_sleep.isin(removed_sleep_days)].dropna(how='all')    
-    reformed_sleep_list_no_nap.append(each_user_sleep)     
 
-# after removing the 'so-called' nap that less than 3 hours, we can change the dates
-reformed_sleep_list_no_repetitive=[]    
-for each_user_sleep in reformed_sleep_list_no_nap:
-    start_dates = [each_day.date() for each_day in each_user_sleep['start_date'].tolist()] 
-    for i in range(len(start_dates)-2):
-        if start_dates[i] == start_dates[i+1] and\
-        (start_dates[i] - timedelta(days=1)) != start_dates[i-1]:
-            start_dates[i] = start_dates[i] - timedelta(days=1)
-        if start_dates[i] == start_dates[i+1] and\
-        (start_dates[i+1] + timedelta(days=1)) != start_dates[i+2]:
-            start_dates[i+1] = start_dates[i+2] - timedelta(days=1)
-    
-    each_user_sleep['date_for_this_sleep'] = start_dates
-    reformed_sleep_list_no_repetitive.append(each_user_sleep)
-
-# notice that in 'date_for_this_sleep' there are still repetitives (eg. in 3-1 date: 19-10-30, 19-11-06)
-# so remove these suplicates days requires 3-by-3 window of checking
-reformed_sleep_no_repetitive=[]    
-for each_user_sleep in reformed_sleep_list_no_repetitive:
-    start_dates = each_user_sleep['date_for_this_sleep'].tolist()
-    for i in range(2,len(start_dates)-3):
-        
-        if start_dates[i] == start_dates[i+1] and\
-        (start_dates[i-1] - timedelta(days=1)) != start_dates[i-1]:
-            start_dates[i-1] = start_dates[i-2] + timedelta(days=1)
-            start_dates[i] = start_dates[i-1] + timedelta(days=1)
-        
-        if start_dates[i] == start_dates[i+1] and\
-        (start_dates[i+2] + timedelta(days=1)) != start_dates[i+3]:
-            start_dates[i+2] = start_dates[i+3] - timedelta(days=1)
-            start_dates[i+1] = start_dates[i+2] - timedelta(days=1)
-    
-    each_user_sleep['new_date_for_this_sleep'] = start_dates
-    reformed_sleep_no_repetitive.append(each_user_sleep)
-
-
-# In 'new_date_for_this_sleep' there are still repetitives 
-# so remove these suplicates days by keeping the longest sleep duration
-reformed_sleep_final=[]    
-for each_user_sleep in reformed_sleep_no_repetitive:
-    drop_dup_df = each_user_sleep.loc[(each_user_sleep['new_date_for_this_sleep'].shift() != each_user_sleep['new_date_for_this_sleep'])]
-    reformed_sleep_final.append(drop_dup_df)
-
-
-# for the Nan values in sleep data, we choose to remove them 
-aaa=[]
-for each_user_sleep in reformed_sleep_final:
-    each_user_sleep = each_user_sleep.dropna(subset=['sleep_duration'])
-    aaa.append(each_user_sleep) 
-    
-    
-#----------------------
-# to CSV files
-bbb=[]
-for each_user_sleep in reformed_sleep_final:
-    each_user_sleep = each_user_sleep.dropna(subset=['sleep_duration'])
-    each_user_sleep = each_user_sleep.drop(columns=['session_id', 'date_for_this_sleep','new_date_for_this_sleep'])
-    bbb.append(each_user_sleep)
-
+#############################################################################
+# To CSV files
+#############################################################################
 path = r'D:/44_single_sleeper'
 
 users_list=[]
-for each in bbb:
+for each in reformed_sleep_list_no_nap:
     users_list.append(each['PID'].tolist()[0])
 
 csv_file_list = []
@@ -179,31 +206,39 @@ for each_user_str in users_list:
     csv_file_list.append(each_csv_name)
 
 for i in range(len(csv_file_list)):
-    bbb[i].to_csv(csv_file_list[i],index=False)
+    reformed_sleep_list_no_nap[i].to_csv(csv_file_list[i],index=False)
     
     
-
 #############################################################################
 # Sleep parameter selection
 #############################################################################
-# Ground truth mobility, ignore those who have data less than 29 days
-def get_sleep_parameter_with_date(reformed_sleep_list,sleep_para,coverting_dividor):
+def get_sleep_parameter_with_date(reformed_sleep_list,sleep_para):
     temp_sleep_duration=[]
     for each_user_sleep in reformed_sleep_list:
         cc = each_user_sleep['PID'].tolist()
-        bb = each_user_sleep['new_date_for_this_sleep'].tolist()
+        bb = each_user_sleep['start_sleep_time'].tolist()
         aa = each_user_sleep[sleep_para].tolist()
-        aa = [x/coverting_dividor for x in aa] # convert second to hours
         user_sleep = pd.DataFrame({'PID':cc,'date':bb,sleep_para:aa})
         temp_sleep_duration.append(user_sleep) 
     return temp_sleep_duration
+temp_sleep_duration = get_sleep_parameter_with_date(reformed_sleep_list_no_nap,'TST(hour)')
+temp_sleep_efficiency = get_sleep_parameter_with_date(reformed_sleep_list_no_nap,'SE')
+temp_waso = get_sleep_parameter_with_date(reformed_sleep_list_no_nap,'WASO(min)')
 
-temp_sleep_duration = get_sleep_parameter_with_date(aaa,'sleep_duration',3600)
-temp_sleep_onset_duration = get_sleep_parameter_with_date(aaa,'sleep_onset_duration',60)
-temp_sleep_efficiency = get_sleep_parameter_with_date(aaa,'sleep_efficiency',1)
-temp_waso = get_sleep_parameter_with_date(aaa,'awake_duration',60)
-temp_sleep_bedexit = get_sleep_parameter_with_date(aaa,'bed_exit_duration',60)
-
+#===========================================================
+temp_sleep_start_time=[];temp_sleep_end_time=[]
+for each_user_sleep in reformed_sleep_list_no_nap:
+    cc = each_user_sleep['PID'].tolist()
+    bb = each_user_sleep['start_sleep_time'].tolist()
+    aa = each_user_sleep['finish_sleep_time'].tolist()
+    
+    bbb = each_user_sleep['start_timestamp'].tolist()
+    aaa = each_user_sleep['end_timestamp'].tolist()
+    
+    user_sleep_start = pd.DataFrame({'PID':cc,'start_sleep_time':bb,'start_timestamp':bbb})
+    user_sleep_end = pd.DataFrame({'PID':cc,'finish_sleep_time':aa,'end_timestamp':aaa})
+    temp_sleep_start_time.append(user_sleep_start)     
+    temp_sleep_end_time.append(user_sleep_end) 
 
 #############################################################################
 # Sleep parameter by different periods
@@ -250,10 +285,6 @@ def one_sleep_para_mean_median(period_start,period_end,temp_sleep_duration, slee
         all_users_this_period = pd.concat([all_users_this_period,this_user_this_period], ignore_index=True)
     return all_users_this_period
 
-first_period = one_sleep_para_mean_median(period1_start,period1_end,temp_sleep_duration, 'sleep_duration')
-second_period = one_sleep_para_mean_median(period2_start,period2_end,temp_sleep_duration, 'sleep_duration')
-third_period = one_sleep_para_mean_median(period3_start,period3_end,temp_sleep_duration, 'sleep_duration')
-
 def one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_end,period2_end,period3_end,temp_sleep_duration, sleep_para):
     first_period = one_sleep_para_mean_median(period1_start,period1_end,temp_sleep_duration, sleep_para)
     second_period = one_sleep_para_mean_median(period2_start,period2_end,temp_sleep_duration, sleep_para)
@@ -266,18 +297,220 @@ def one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_e
     df_concat.index = ID_list
     return df_concat
 
-df_concat_TST = one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_end,period2_end,period3_end,temp_sleep_duration, 'sleep_duration')
-df_concat_WASO = one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_end,period2_end,period3_end,temp_waso, 'awake_duration')
-df_concat_SE = one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_end,period2_end,period3_end,temp_sleep_efficiency, 'sleep_efficiency')
+df_concat_TST = one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_end,period2_end,period3_end,temp_sleep_duration, 'TST(hour)')
+df_concat_WASO = one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_end,period2_end,period3_end,temp_waso, 'WASO(min)')
+df_concat_SE = one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_end,period2_end,period3_end,temp_sleep_efficiency, 'SE')
+
+#############################################################################
+# Sleep start and end time by different periods
+#############################################################################
+# get mean of time list
+from cmath import rect, phase
+from math import radians, degrees
+
+def meanAngle(deg):
+    complexDegree = sum(rect(1, radians(d)) for d in deg) / len(deg)
+    argument = phase(complexDegree)
+    meanAngle = degrees(argument)
+    return meanAngle
+
+def meanTime(times):
+    t = (time.split(':') for time in times)
+    seconds = ((float(s) + int(m) * 60 + int(h) * 3600) 
+               for h, m, s in t)
+    day = 24 * 60 * 60
+    toAngles = [s * 360. / day for s in seconds]
+    meanAsAngle = meanAngle(toAngles)
+    meanSeconds = meanAsAngle * day / 360.
+    if meanSeconds < 0:
+        meanSeconds += day
+    h, m = divmod(meanSeconds, 3600)
+    m, s = divmod(m, 60)
+    return('%02i:%02i:%02i' % (h, m, s))
+
+print( meanTime(['03:07:00','23:09:08']) )
+
+#---------------------------
+def one_period_time_mean_median(period_start,period_end,temp_sleep_start_time, start_end_str):
+    all_users_this_period=pd.DataFrame({})
+    for each_user in temp_sleep_start_time:
+        test = each_user.loc[(each_user[start_end_str] > period_start) & (each_user[start_end_str] <= period_end)]
+        if len(test)==0:
+            mean=np.nan; median = np.nan; earliest_time=np.nan; latest_time=np.nan
+        if len(test)==1:
+            test[start_end_str] = pd.to_datetime(test[start_end_str], unit='s')
+            test['start_sleep_time_hour'] = [a.time() for a in test[start_end_str].tolist()]
+            test['start_sleep_time_hour'] = [a.strftime("%H:%M:%S") for a in test['start_sleep_time_hour'].tolist()]
+            mean = str(test['start_sleep_time_hour'].tolist()[0])+' #'
+            median = mean
+            earliest_time = mean
+            latest_time = mean
+        if len(test) > 1:  
+            test[start_end_str] = pd.to_datetime(test[start_end_str], unit='s')
+            test['start_sleep_time_hour'] = [a.time() for a in test[start_end_str].tolist()]
+            # convert to str
+            test['start_sleep_time_hour'] = [a.strftime("%H:%M:%S") for a in test['start_sleep_time_hour'].tolist()]
+            # input the list of str to function
+            mean = meanTime(test['start_sleep_time_hour'].tolist())
+            #---------------------------
+            # get median of time list
+            # sort the time, and count length, if odd, take median;
+            # if even, take mean of two middle values
+            test = test.sort_values(by=['start_sleep_time_hour'])
+            start_sleep_time_hour_df = test['start_sleep_time_hour'].reset_index()
+            if len(test)%2 == 1: # length is odd number
+                median = start_sleep_time_hour_df['start_sleep_time_hour'].iloc[int((len(test)+1)/2)]
+            if len(test)%2 == 0: # length is even number
+                first = start_sleep_time_hour_df['start_sleep_time_hour'].iloc[int(len(test)/2)]
+                second = start_sleep_time_hour_df['start_sleep_time_hour'].iloc[int((len(test)+2)/2)]
+                median = meanTime([first,second])
+            #---------------------------
+            # get eralier and latest time list, case by case
+            fixed_time_day_divisor = dt.time(0,0,0).strftime("%H:%M:%S")
+            today_start_sleep_time_df = start_sleep_time_hour_df[start_sleep_time_hour_df['start_sleep_time_hour']<fixed_time_day_divisor]
+            tmr_start_sleep_time_df = start_sleep_time_hour_df[start_sleep_time_hour_df['start_sleep_time_hour']>=fixed_time_day_divisor]
+        
+            if len(today_start_sleep_time_df)>0:
+                earliest_time = today_start_sleep_time_df['start_sleep_time_hour'].tolist()[0]
+            if len(today_start_sleep_time_df)==0:
+                earliest_time = tmr_start_sleep_time_df['start_sleep_time_hour'].tolist()[0]
+            if len(tmr_start_sleep_time_df)>0:
+                latest_time = tmr_start_sleep_time_df['start_sleep_time_hour'].tolist()[-1]
+            if len(tmr_start_sleep_time_df)==0:
+                latest_time = today_start_sleep_time_df['start_sleep_time_hour'].tolist()[-1]
+                
+        # store values
+        this_user_this_period = pd.DataFrame({'mean_start_time':mean,'median_start_time':median,
+                                              'earliest_start_time':earliest_time,
+                                              'latest_start_time':latest_time}, index=[0])
+        all_users_this_period = pd.concat([all_users_this_period,this_user_this_period], ignore_index=True)
+    return all_users_this_period
+
+
+def one_period_time_all_users(period1_start,period2_start,period3_start,period1_end,
+                              period2_end,period3_end,temp_sleep_start_time,start_end_str):
+    first_period = one_period_time_mean_median(period1_start,period1_end,
+                                               temp_sleep_start_time,start_end_str)
+    second_period = one_period_time_mean_median(period2_start,period2_end,
+                                                temp_sleep_start_time,start_end_str)
+    third_period = one_period_time_mean_median(period3_start,period3_end,
+                                               temp_sleep_start_time,start_end_str)
+    ID_list=[]
+    for each in temp_sleep_start_time:
+        ID_list.append(each['PID'].tolist()[0])
+    # concate the dataframe
+    df_concat = pd.concat([first_period,second_period,third_period], axis=1)
+    df_concat.index = ID_list
+    return df_concat
+
+df_concat_start_time = one_period_time_all_users(period1_start,period2_start,
+                                                 period3_start,period1_end,period2_end,period3_end,
+                                                 temp_sleep_start_time,'start_sleep_time')
+
+#-----------------------------------------------------------
+def one_period_time_end(period_start,period_end,temp_sleep_end_time, start_end_str):
+    all_users_this_period=pd.DataFrame({})
+    for each_user in temp_sleep_end_time:
+        test = each_user.loc[(each_user[start_end_str] > period_start) & (each_user[start_end_str] <= period_end)]
+        if len(test)==0:
+            mean=np.nan; median = np.nan; earliest_time=np.nan; latest_time=np.nan
+        if len(test)==1:
+            test[start_end_str] = pd.to_datetime(test[start_end_str], unit='s')
+            test['end_sleep_time_hour'] = [a.time() for a in test[start_end_str].tolist()]
+            test['end_sleep_time_hour'] = [a.strftime("%H:%M:%S") for a in test['end_sleep_time_hour'].tolist()]
+            mean = str(test['end_sleep_time_hour'].tolist()[0])+' #'
+            median = mean
+            earliest_time = mean
+            latest_time = mean
+        if len(test)==2:
+            test[start_end_str] = pd.to_datetime(test[start_end_str], unit='s')
+            test['end_sleep_time_hour'] = [a.time() for a in test[start_end_str].tolist()]
+            test['end_sleep_time_hour'] = [a.strftime("%H:%M:%S") for a in test['end_sleep_time_hour'].tolist()]
+            mean = str(meanTime(test['end_sleep_time_hour'].tolist()))+' #'
+            median = mean
+            test = test.sort_values(by=['end_sleep_time_hour'])
+            end_sleep_time_hour_df = test['end_sleep_time_hour'].reset_index()
+            fixed_time_day_divisor = dt.time(0,0,0).strftime("%H:%M:%S")
+            today_start_sleep_time_df = end_sleep_time_hour_df[end_sleep_time_hour_df['end_sleep_time_hour']<fixed_time_day_divisor]
+            tmr_start_sleep_time_df = end_sleep_time_hour_df[end_sleep_time_hour_df['end_sleep_time_hour']>=fixed_time_day_divisor]
+            if len(today_start_sleep_time_df)>0:
+                earliest_time = today_start_sleep_time_df['end_sleep_time_hour'].tolist()[0]
+            if len(today_start_sleep_time_df)==0:
+                earliest_time = tmr_start_sleep_time_df['end_sleep_time_hour'].tolist()[0]
+            if len(tmr_start_sleep_time_df)>0:
+                latest_time = tmr_start_sleep_time_df['end_sleep_time_hour'].tolist()[-1]
+            if len(tmr_start_sleep_time_df)==0:
+                latest_time = today_start_sleep_time_df['end_sleep_time_hour'].tolist()[-1]
+            earliest_time = str(earliest_time)+' #'
+            latest_time = str(latest_time)+' #'
+        if len(test) > 2:  
+            test[start_end_str] = pd.to_datetime(test[start_end_str], unit='s')
+            test['end_sleep_time_hour'] = [a.time() for a in test[start_end_str].tolist()]
+            # convert to str
+            test['end_sleep_time_hour'] = [a.strftime("%H:%M:%S") for a in test['end_sleep_time_hour'].tolist()]
+            # input the list of str to function
+            mean = meanTime(test['end_sleep_time_hour'].tolist())
+            #---------------------------
+            # get median of time list
+            # sort the time, and count length, if odd, take median;
+            # if even, take mean of two middle values
+            test = test.sort_values(by=['end_sleep_time_hour'])
+            start_sleep_time_hour_df = test['end_sleep_time_hour'].reset_index()
+            if len(test)%2 == 1: # length is odd number
+                median = start_sleep_time_hour_df['end_sleep_time_hour'].iloc[int((len(test)+1)/2)]
+            if len(test)%2 == 0: # length is even number
+                first = start_sleep_time_hour_df['end_sleep_time_hour'].iloc[int(len(test)/2)]
+                second = start_sleep_time_hour_df['end_sleep_time_hour'].iloc[int((len(test)+2)/2)]
+                median = meanTime([first,second])
+            #---------------------------
+            # get eralier and latest time list, case by case
+            fixed_time_day_divisor = dt.time(0,0,0).strftime("%H:%M:%S")
+            today_start_sleep_time_df = start_sleep_time_hour_df[start_sleep_time_hour_df['end_sleep_time_hour']<fixed_time_day_divisor]
+            tmr_start_sleep_time_df = start_sleep_time_hour_df[start_sleep_time_hour_df['end_sleep_time_hour']>=fixed_time_day_divisor]
+        
+            if len(today_start_sleep_time_df)>0:
+                earliest_time = today_start_sleep_time_df['end_sleep_time_hour'].tolist()[0]
+            if len(today_start_sleep_time_df)==0:
+                earliest_time = tmr_start_sleep_time_df['end_sleep_time_hour'].tolist()[0]
+            if len(tmr_start_sleep_time_df)>0:
+                latest_time = tmr_start_sleep_time_df['end_sleep_time_hour'].tolist()[-1]
+            if len(tmr_start_sleep_time_df)==0:
+                latest_time = today_start_sleep_time_df['end_sleep_time_hour'].tolist()[-1]
+                
+        # store values
+        this_user_this_period = pd.DataFrame({'mean_end_time':mean,'median_end_time':median,
+                                              'earliest_end_time':earliest_time,
+                                              'latest_end_time':latest_time}, index=[0])
+        all_users_this_period = pd.concat([all_users_this_period,this_user_this_period], ignore_index=True)
+    return all_users_this_period
+
+def one_period_end_time_all_users(period1_start,period2_start,period3_start,period1_end,
+                              period2_end,period3_end,temp_sleep_end_time,start_end_str):
+    first_period = one_period_time_end(period1_start,period1_end,
+                                               temp_sleep_end_time,start_end_str)
+    second_period = one_period_time_end(period2_start,period2_end,
+                                                temp_sleep_end_time,start_end_str)
+    third_period = one_period_time_end(period3_start,period3_end,
+                                               temp_sleep_end_time,start_end_str)
+    ID_list=[]
+    for each in temp_sleep_start_time:
+        ID_list.append(each['PID'].tolist()[0])
+    # concate the dataframe
+    df_concat = pd.concat([first_period,second_period,third_period], axis=1)
+    df_concat.index = ID_list
+    return df_concat
+
+df_concat_end_time = one_period_end_time_all_users(period1_start,period2_start,
+                                               period3_start,period1_end,period2_end,period3_end,
+                                               temp_sleep_end_time,'finish_sleep_time')
 
 ############################################################################
-# Visualization of sleep
-#############################################################################
 # from users get their ages
+#############################################################################
 user_gender = pd.read_csv(r'D:\Sensor_Data_Processing\gender_label\survey_labels.csv')
 user_list_sleep=[]
-for i in range(len(reformed_sleep_no_repetitive)):
-    user_list_sleep.append(reformed_sleep_no_repetitive[i]['PID'].tolist()[0])
+for i in range(len(reformed_sleep_list_no_nap)):
+    user_list_sleep.append(reformed_sleep_list_no_nap[i]['PID'].tolist()[0])
 user_gender = user_gender[user_gender['record_id'].isin(user_list_sleep)]
 time_list = user_gender["date_of_birth"].values.tolist()
 datetime_list = [dt.datetime.strptime(x, '%Y-%m-%d') for x in time_list]
@@ -298,8 +531,10 @@ user_gender['ATSM'] = [int(x) for x in user_gender['ATSM'].tolist()]
 #############################################################################
 #df = df_concat_TST.merge(df_concat_WASO, how="inner", left_index=True, right_index=True)
 #df = df.merge(df_concat_SE, how="inner", left_index=True, right_index=True)
+#df_concat_end_time
+#df_concat_start_time
 # add mental score
-df=df_concat_SE
+df=df_concat_start_time
 
 df = df[df.index.isin(user_gender['record_id'].tolist())]
 
@@ -310,7 +545,7 @@ joined_table = df.merge(user_gender_atsm_score,left_on=df.index,right_on='record
 joined_table = joined_table.rename({'ATSM': 'mental_score'}, axis=1)  
 
 # write table to excel
-joined_table.to_excel(r'D:\solitray_44_sleepers\se.xlsx',index=False)
+joined_table.to_excel(r'D:\solitray_44_sleepers\start.xlsx',index=False)
 
 
 #############################################################################
