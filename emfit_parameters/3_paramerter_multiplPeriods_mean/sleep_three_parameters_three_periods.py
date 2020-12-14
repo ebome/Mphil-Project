@@ -223,7 +223,7 @@ def obtain_nap_duration_count(nap_episodes_list):
     for each_epi in nap_episodes_list:
         final_big_df = pd.concat([final_big_df,each_epi])
     final_big_df = final_big_df.sort_values('start_date')
-    nap_duration = (final_big_df['sleep_duration'].sum())/60
+    nap_duration = (final_big_df['sleep_duration'].sum())/3600
     nap_count = len(final_big_df['awake_duration'])
     start_sleep_time = final_big_df['start_date'].tolist()[0]
     finish_sleep_time = final_big_df['end_date'].tolist()[-1]
