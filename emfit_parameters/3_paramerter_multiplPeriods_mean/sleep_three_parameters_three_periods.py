@@ -2,17 +2,11 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import datetime as dt
-import mysql.connector
 
 ###################################################
 # Sleep summary data: Fetch from local database
 ###################################################
-mydb = mysql.connector.connect(user ='root', password ='123456')
-mycursor = mydb.cursor()
-# approximately 3 min to finish loading 5 million lines
-dacs_all_sleep = pd.read_sql("SELECT * FROM dacs_all_data.sleep_data_up_to_nov;", con=mydb)
-mycursor.close()
-mydb.close()
+dacs_all_sleep = pd.read_csv(r'D:\data\sleep_data_up_to_Nov.csv')
 
 dacs_all_sleep['start_date']=pd.to_datetime(dacs_all_sleep['start_date'])
 dacs_all_sleep['end_date']=pd.to_datetime(dacs_all_sleep['end_date'])
@@ -217,7 +211,7 @@ def obtain_nap_duration_count(nap_episodes_list):
     if len(nap_episodes_list) ==0:
         return pd.DataFrame({'start_sleep_this_day':np.datetime64('NaT'),
                              'end_sleep_this_day':np.datetime64('NaT'),
-                             'nap_duration(min)':0,'nap_count':0}, index=[0])
+                             'nap_duration(hour)':0,'nap_count':0}, index=[0])
     # if there is episode in nap_list, return nap duration
     final_big_df = pd.DataFrame({})
     for each_epi in nap_episodes_list:
@@ -230,8 +224,29 @@ def obtain_nap_duration_count(nap_episodes_list):
 
     return pd.DataFrame({'start_sleep_this_day':start_sleep_time,
                          'end_sleep_this_day':finish_sleep_time,
-                         'nap_duration(min)':nap_duration,'nap_count':nap_count}, index=[0])
+                         'nap_duration(hour)':nap_duration,'nap_count':nap_count}, index=[0])
 
+def obtain_nap_episode(nap_episodes_list):
+    # if there is no episodes in nap_list, return 0 counts
+    if len(nap_episodes_list) ==0:
+        return pd.DataFrame({'start_nap_time':np.datetime64('NaT'),
+                             'end_nap_time':np.datetime64('NaT'),
+                             'nap_duration(hour)':0,'nap_count':0}, index=[0])
+    # if there is episode in nap_list, return nap duration
+    final_big_df = pd.DataFrame({})
+    for each_epi in nap_episodes_list:
+        each_epi = each_epi.sort_values('start_date')
+        nap_duration = (each_epi['sleep_duration'].tolist()[0])/3600
+        start_sleep_time = each_epi['start_date'].tolist()[0]
+        finish_sleep_time = each_epi['end_date'].tolist()[0]
+        one_nap = pd.DataFrame({'start_nap_time':start_sleep_time,
+                         'end_nap_time':finish_sleep_time,
+                         'nap_duration(hour)':nap_duration,'nap_count':1}, index=[0])        
+        final_big_df = pd.concat([final_big_df,one_nap])
+    
+    return final_big_df
+
+    
     
 # NOTE: we should use start_date ALL THE TIME, since end_date is not necessary
 def get_one_user_nap_data(test_user,choppedTime_nap,choppedTime):
@@ -240,6 +255,7 @@ def get_one_user_nap_data(test_user,choppedTime_nap,choppedTime):
     last_date_in_this_user = test_user['start_date'].tolist()[-1]
 
     sleep_summary_one_person = pd.DataFrame({})
+    nap_episode_one_person = pd.DataFrame({})
     for i in range(len(choppedTime)-1):
         # use night sleep as a index
         one_day_sleep  = test_user[test_user['start_date'] > choppedTime[i]]
@@ -261,23 +277,30 @@ def get_one_user_nap_data(test_user,choppedTime_nap,choppedTime):
         start_time = dt.datetime.strptime(choppedTime_nap[i],'%Y-%m-%d %H:%M:%S')
         one_day_nap_with_episodes = keep_nap_in_interval(one_day_nap, start_time)
         nap_episodes_list = keep_longest_tst_in_episode(one_day_nap_with_episodes)
-        daily_summary = obtain_nap_duration_count(nap_episodes_list)    
+        daily_summary = obtain_nap_duration_count(nap_episodes_list)  
         sleep_summary_one_person = pd.concat([sleep_summary_one_person,daily_summary])
         
+        daily_naps = obtain_nap_episode(nap_episodes_list)    
+        nap_episode_one_person = pd.concat([nap_episode_one_person,daily_naps])
+        
     sleep_summary_one_person['PID'] = test_user['PID'].tolist()[0]
-    abab = sleep_summary_one_person.reset_index().drop(columns=['index'])
+    nap_summary = sleep_summary_one_person.reset_index().drop(columns=['index'])
 
-    return abab
+    nap_episode_one_person['PID'] = test_user['PID'].tolist()[0]
+    nap_records = nap_episode_one_person.reset_index().drop(columns=['index'])
+
+    return nap_summary,nap_records
 
 #------------------
 reformed_sleep_list_nap = []
+reformed_sleep_list_nap_records = []
 for i in range(len(reformed_sleep_list_temp)):
     test_user = reformed_sleep_list_temp[i]
     # drop rows with nan sleep_duration
     test_user = test_user.dropna(subset=['sleep_duration'])
-    sleep_summary_one_person = get_one_user_nap_data(test_user,choppedTime_nap,choppedTime)
-    reformed_sleep_list_nap.append(sleep_summary_one_person)
-
+    nap_summary,nap_records = get_one_user_nap_data(test_user,choppedTime_nap,choppedTime)
+    reformed_sleep_list_nap.append(nap_summary)
+    reformed_sleep_list_nap_records.append(nap_records)
 
 #############################################################################
 # To CSV files
@@ -285,7 +308,7 @@ for i in range(len(reformed_sleep_list_temp)):
 path = r'D:/44_single_sleeper_daytime_nap'
 
 users_list=[]
-for each in reformed_sleep_list_nap: # reformed_sleep_list_no_nap
+for each in reformed_sleep_list_nap_records: # reformed_sleep_list_nap_records reformed_sleep_list_no_nap
     users_list.append(each['PID'].tolist()[0])
 
 csv_file_list = []
@@ -295,7 +318,7 @@ for each_user_str in users_list:
 
 # reformed_sleep_list_no_nap
 for i in range(len(csv_file_list)):
-    reformed_sleep_list_nap[i].to_csv(csv_file_list[i],index=False)
+    reformed_sleep_list_nap_records[i].to_csv(csv_file_list[i],index=False)
     
     
 #############################################################################
@@ -323,7 +346,7 @@ def get_nap_parameter_with_date(reformed_sleep_list,sleep_para):
         user_sleep = pd.DataFrame({'PID':cc,'date':bb,sleep_para:aa})
         temp_sleep_duration.append(user_sleep) 
     return temp_sleep_duration
-temp_nap_duration = get_nap_parameter_with_date(reformed_sleep_list_nap,'nap_duration(min)')
+temp_nap_duration = get_nap_parameter_with_date(reformed_sleep_list_nap,'nap_duration(hour)')
 temp_nap_count = get_nap_parameter_with_date(reformed_sleep_list_nap,'nap_count')
 
 #===========================================================
@@ -399,13 +422,13 @@ df_concat_TST = one_sleep_para_all_users(period1_start,period2_start,period3_sta
 df_concat_WASO = one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_end,period2_end,period3_end,temp_waso, 'WASO(min)')
 df_concat_SE = one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_end,period2_end,period3_end,temp_sleep_efficiency, 'SE')
 
-df_concat_nap_duration = one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_end,period2_end,period3_end,temp_nap_duration, 'nap_duration(min)')
+df_concat_nap_duration = one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_end,period2_end,period3_end,temp_nap_duration, 'nap_duration(hour)')
 df_concat_nap_count = one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_end,period2_end,period3_end,temp_nap_count, 'nap_count')
 
 
 
 #=============================================
-# get mobility
+# get mobility, mobility is number of room transitions
 final_big_df = pd.read_excel(r'D:\Meeting Updates\sleep_mob_45_solitary_users.xlsx')
 # group by PID
 mobility_grouped = list(final_big_df.groupby(['PID']))
@@ -630,7 +653,7 @@ for i in range(len(reformed_sleep_list_no_nap)):
 user_gender = user_gender[user_gender['record_id'].isin(user_list_sleep)]
 time_list = user_gender["date_of_birth"].values.tolist()
 datetime_list = [dt.datetime.strptime(x, '%Y-%m-%d') for x in time_list]
-age_list = [(dt.datetime.today() - birth_date) // dt.timedelta(days=365.2425) for birth_date in datetime_list]
+age_list = [(dt.datetime(2019, 11, 1, 0, 0, 0) - birth_date) // dt.timedelta(days=365.2425) for birth_date in datetime_list]
 user_gender['age'] = age_list 
 user_gender = user_gender.sort_values(by=['record_id']).reset_index()
 user_gender['home_care_package_level'].loc[(user_gender['home_care_package_level']==6)] = 1
@@ -653,7 +676,7 @@ user_gender['ATSM'] = [int(x) for x in user_gender['ATSM'].tolist()]
 # df_concat_nap_duration
 # df_concat_nap_count
 # add mental score
-df=df_concat_nap_duration
+df=df_concat_mobility
 
 df = df[df.index.isin(user_gender['record_id'].tolist())]
 
@@ -664,7 +687,7 @@ joined_table = df.merge(user_gender_atsm_score,left_on=df.index,right_on='record
 joined_table = joined_table.rename({'ATSM': 'mental_score'}, axis=1)  
 
 # write table to excel
-joined_table.to_excel(r'D:\solitray_44_sleepers\nap_duration.xlsx',index=False)
+joined_table.to_excel(r'D:\solitray_44_sleepers\mobility.xlsx',index=False)
 
 
 #############################################################################
@@ -732,4 +755,3 @@ plot_SE_for_one_age_group(joined_table_70s_half_B,'Sleepers in their 70s')
 plot_SE_for_one_age_group(joined_table_80s_half_A,'Sleepers in their 80s')
 plot_SE_for_one_age_group(joined_table_80s_half_B,'Sleepers in their 80s')
 plot_SE_for_one_age_group(joined_table_90s,'Sleepers in their 90s')
-
