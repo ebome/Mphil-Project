@@ -623,7 +623,7 @@ for i in range(len(user_45_PID)):
     final_big_df = pd.concat([final_big_df,merged_df])
 
 '''
-9926 rows for 45 people, 8487 rows for 37 people
+9926 rows for 45 people, 8920rows for 29 people, 8487 rows for 37 people
 '''
 
 # remove the unwanted people
@@ -703,22 +703,18 @@ print('pval=',t)
 '''
 ######################################################
 # Multivariate regression
-#df = final_big_df[['PID','start_day_trucated','num_of_transition','PID','TST(hour)','WASO(min)','SOL(min)',
-#                    'SE','duration_in_bed','toss_turn_count','avg_hr','avg_rr','awake_count',
-#                    'bed_exit_count','bed_exit_duration','age','gender','ATSM']]
-
-df = final_big_df[['PID','start_day_trucated','num_of_transition','PID','TST(hour)','WASO(min)','SOL(min)',
+df = final_big_df[['PID','start_day_trucated','num_of_transition','TST(hour)','WASO(min)','SOL(min)',
                     'SE','duration_in_bed','toss_turn_count','avg_hr','avg_rr','awake_count',
-                    'bed_exit_count','bed_exit_duration','age','gender','ATSM']]
+                    'bed_exit_count','bed_exit_duration(min)','age','gender','ATSM']]
 
 #df.to_excel(r'D:\Meeting Updates\sleep_mob_39_users.xlsx')
 
 #############################################################################
 # Samplping of data
 #############################################################################
-df = final_big_df[['PID','start_day_trucated','num_of_transition','PID','TST(hour)','WASO(min)','SOL(min)',
-                    'SE','duraion_in_bed','toss_turn_count','avg_hr','avg_rr','awake_count',
-                    'bed_exit_count','bed_exit_duration','age','gender','ATSM']]
+df = final_big_df[['PID','start_day_trucated','num_of_transition','TST(hour)','WASO(min)','SOL(min)',
+                    
+                    'bed_exit_duration(min)','age','gender','ATSM']]
 # group by individuals
 a = list(df.groupby(['PID']))
 temp_store=[]
@@ -744,14 +740,14 @@ for each in each_user_sampled_list:
     each.reset_index(drop=True, inplace=True)
     mobility_baseline = pd.concat([mobility_baseline,each])
 
-baseline_mae = metrics.mean_absolute_error(mobility_baseline['mob(d)'], mobility_baseline['mob(d+1)'])
+baseline_mae = metrics.mean_absolute_error(mobility_baseline['mob(d)'], mobility_baseline['mob(d+1)']) # (y_true, y_pred)
 print(baseline_mae)
 baseline_r2 = metrics.r2_score(mobility_baseline['mob(d)'], mobility_baseline['mob(d+1)'])
 print(baseline_r2)
 
 #==============================
 def get_sampling_dataset(temp_store_list,d):    
-# d: d is the day after sleep, d=1 means mobility just after that day of sleep
+# d: d is the day after sleep, d=1 means mobility is just after that day of sleep
     each_user_sampled_list =[]
     for each_user in temp_store_list:
         each_user_mob = each_user.iloc[list(range(d,len(each_user))),[0,1,2]]
@@ -776,49 +772,25 @@ def get_sampling_dataset(temp_store_list,d):
 sampled_df_day_0 = get_sampling_dataset(temp_store,1)
 sampled_df_day_1 = get_sampling_dataset(temp_store,2)
 sampled_df_day_2 = get_sampling_dataset(temp_store,3)
-sampled_df_day_3 = get_sampling_dataset(temp_store,4)
-sampled_df_day_4 = get_sampling_dataset(temp_store,5)
-sampled_df_day_5 = get_sampling_dataset(temp_store,6)
-sampled_df_day_6 = get_sampling_dataset(temp_store,7)
+#sampled_df_day_3 = get_sampling_dataset(temp_store,4)
 
 #==============================
-'''
-each_user = temp_store[7]
-each_user_sleep = each_user.iloc[:,list(range(3,len(each_user.columns)))]
-for c in each_user_sleep.columns:
-    each_user_sleep[c] = each_user_sleep[c].rolling(5).mean()
-each_user_sleep = each_user_sleep.iloc[list(range(4,len(each_user))),:]
-
-each_user_mob = each_user.iloc[list(range(4,len(each_user))),[0,1,2]]
-
-each_user_mob.reset_index(drop=True, inplace=True)
-each_user_sleep.reset_index(drop=True, inplace=True)
-each_user_sampled = pd.concat([each_user_mob, each_user_sleep], axis=1,ignore_index=True)
-each_user_sampled.columns = each_user.columns
-'''
-
-def get_sampling_dataset_from_multiple_sleep_days(temp_store_list,d, sleep_window):    
-# d: d is the day after sleep, d=1 means mobility just after that day of sleep
-# sleep window: hoe many days of sleep will be averaged
+def get_sampling_dataset_from_multiple_sleep_days(temp_store_list,sleep_window):    
+# d: d is the day after sleep, d=1 means mobility is just after that day of sleep
+# sleep window: how many days of sleep will be averaged
     each_user_sampled_list =[]
     for each_user in temp_store_list:
         
-        each_user_sleep = each_user.iloc[:,list(range(3,len(each_user.columns)))]
+        each_user_sleep = each_user.iloc[:,list(range(3,len(each_user.columns)))] # this cut columns for sleep para
         for c in each_user_sleep.columns:
             each_user_sleep[c] = each_user_sleep[c].rolling(sleep_window).mean()
-        each_user_sleep = each_user_sleep.iloc[list(range(sleep_window-1,len(each_user))),:]
+        each_user_sleep = each_user_sleep.iloc[list(range(sleep_window-1,len(each_user))),:] # 'sleep_window-1': not need for first several days since they are not represented by rolling mean
 
-        each_user_mob = each_user.iloc[list(range(sleep_window-1,len(each_user))),[0,1,2]]
+        each_user_mob = each_user.iloc[list(range(sleep_window,len(each_user))),[0,1,2]] # this cut columns for mob 
         each_user_mob.reset_index(drop=True, inplace=True)
         each_user_sleep.reset_index(drop=True, inplace=True)
         each_user_sampled = pd.concat([each_user_mob, each_user_sleep], axis=1,ignore_index=True)
-        
-        # consider the window of mobility and sleep
-        each_user_mob = each_user_sampled.iloc[list(range(d-1,len(each_user_sampled))),[0,1,2]]
-        each_user_sleep = each_user_sampled.iloc[list(range(0,len(each_user_sampled)-d+1)),list(range(3,len(each_user.columns)))]
-        each_user_mob.reset_index(drop=True, inplace=True)
-        each_user_sleep.reset_index(drop=True, inplace=True)
-        each_user_sampled = pd.concat([each_user_mob, each_user_sleep], axis=1,ignore_index=True)
+        each_user_sampled = each_user_sampled.dropna(how='any')
 
         # up to this step, each_user_sampled miss the column name, so add columns name
         each_user_sampled.columns = each_user.columns
@@ -832,22 +804,15 @@ def get_sampling_dataset_from_multiple_sleep_days(temp_store_list,d, sleep_windo
 
     return final_big_df
 
-sampled_df_day_0 = get_sampling_dataset_from_multiple_sleep_days(temp_store,1,3)
-sampled_df_day_1 = get_sampling_dataset_from_multiple_sleep_days(temp_store,2,3)
-sampled_df_day_2 = get_sampling_dataset_from_multiple_sleep_days(temp_store,3,3)
-sampled_df_day_3 = get_sampling_dataset_from_multiple_sleep_days(temp_store,4,3)
-sampled_df_day_4 = get_sampling_dataset_from_multiple_sleep_days(temp_store,5,3)
-sampled_df_day_5 = get_sampling_dataset_from_multiple_sleep_days(temp_store,6,3)
-sampled_df_day_6 = get_sampling_dataset_from_multiple_sleep_days(temp_store,7,3)
-
+sleep_window = 3
+sampled_df_day_0 = get_sampling_dataset_from_multiple_sleep_days(temp_store,sleep_window)
 
 #############################################################################
 # Regression model
 #############################################################################
 # split train, test sets based on shuffle
 
-df_big = [sampled_df_day_0,sampled_df_day_1,sampled_df_day_2,sampled_df_day_3,sampled_df_day_4,
-      sampled_df_day_5,sampled_df_day_6]
+df_big = [sampled_df_day_0,sampled_df_day_1,sampled_df_day_2]
 
 mae=[];r_score=[]
 for df in df_big:
@@ -859,12 +824,11 @@ for df in df_big:
     # Fit a model
     lm = linear_model.LinearRegression()
 
-    # 5 fold Cross validation
-    scores = cross_val_score(lm, X, Y_true, cv=5)
-#    print('Cross-validated scores:', scores)
+    # 10 fold Cross validation
+    scores = cross_val_score(lm, X, Y_true, cv=10)
 
     # Make cross validated predictions
-    predictions = cross_val_predict(lm, X, Y_true, cv=5)
+    predictions = cross_val_predict(lm, X, Y_true, cv=10)
 
     accuracy = metrics.r2_score(Y_true, predictions)
     accuracy_mae = metrics.mean_absolute_error(Y_true, predictions)
@@ -873,7 +837,6 @@ for df in df_big:
     
 #    print('Cross-Predicted Accuracy MAE:', "{:.3f}".format(accuracy_mae))
 #    print('Cross-Predicted Accuracy R2:',"{:.5f}".format(accuracy))
-
 
 #############################################################################
 # SAX discratize mobility one by one
