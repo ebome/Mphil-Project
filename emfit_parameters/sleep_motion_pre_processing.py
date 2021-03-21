@@ -416,26 +416,48 @@ for test_user in reformed_sleep_list_temp:
 #------------------
 # there are repetitive date appear in reformed_sleep_list_no_nap, so change them
 
-# treat sleep start time within 7pm-6am as the same day sleep    
+# there are repetitive date appear in reformed_sleep_list_no_nap, so change them
+
 reformed_sleep_list_no_repetitive=[] 
 for each_user_sleep in reformed_sleep_list_no_nap:
     start_sleep_aaaa = each_user_sleep['start_sleep_time'].tolist()
+    end_sleep_aaaa = each_user_sleep['finish_sleep_time'].tolist()
     # create the non-repetitive list, each date means sleep starts from that date's night
     start_sleep_dates = [] 
-    for a in start_sleep_aaaa:
+    for i in range(len(start_sleep_aaaa)):
+        a = start_sleep_aaaa[i]
+        b = end_sleep_aaaa[i]
+
         time_division_today = dt.datetime(a.year,a.month,a.day,23,59,59)
         time_division_tmr = dt.datetime(a.year,a.month,a.day,0,0,0)
         time_division_7pm = dt.datetime(a.year,a.month,a.day,19,0,0)
         time_division_6am = dt.datetime(a.year,a.month,a.day,6,0,0)
-        if a < time_division_today and a>=time_division_7pm:
+        
+        start_sleep_only_date = dt.datetime(a.year,a.month,a.day)
+        end_sleep_only_date = dt.datetime(b.year,b.month,b.day)
+        
+        # If start sleep time is between 7pm-11:59pm, and end sleep time is  
+        # next day, count this sleep as next day
+        if a <= time_division_today and a>=time_division_7pm and start_sleep_only_date!=end_sleep_only_date:
+            each_sleep_date = a.date() + timedelta(days=1)
+            start_sleep_dates.append(each_sleep_date)
+
+        # If start sleep time is between 7pm-11:59pm, and end sleep time is  
+        # same day, count this sleep as this day
+        ##### if not adding this line, user_index= 23 line 325,line 326 would be same day
+        if a <= time_division_today and a>=time_division_7pm and start_sleep_only_date==end_sleep_only_date:
             each_sleep_date = a.date()
             start_sleep_dates.append(each_sleep_date)
-        if a >= time_division_tmr and a<=time_division_6am:
-            each_sleep_date = a.date() - timedelta(days=1)
+
+        # If start sleep time is between 0am-6am, and end sleep time is  
+        # same day, count this sleep as this day
+        if a >= time_division_tmr and a<=time_division_6am and start_sleep_only_date==end_sleep_only_date:
+            each_sleep_date = a.date()
             start_sleep_dates.append(each_sleep_date)
 
     each_user_sleep['date_for_this_sleep'] = start_sleep_dates
     reformed_sleep_list_no_repetitive.append(each_user_sleep)   
+
 
 
 ###################################################
