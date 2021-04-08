@@ -6,10 +6,10 @@ import datetime as dt
 ###################################################
 # Sleep summary data: Fetch from local database
 ###################################################
-dacs_all_sleep = pd.read_csv(r'D:\data\sleep_data_up_to_Nov.csv')
+dacs_all_sleep = pd.read_csv(r'F:\data\sleep_data_up_to_Nov.csv')
 
-dacs_all_sleep['start_date']=pd.to_datetime(dacs_all_sleep['start_date'])
-dacs_all_sleep['end_date']=pd.to_datetime(dacs_all_sleep['end_date'])
+dacs_all_sleep['start_date'] = [dt.datetime.fromtimestamp(x) for x in dacs_all_sleep['start_time']]
+dacs_all_sleep['end_date'] = [dt.datetime.fromtimestamp(x) for x in dacs_all_sleep['end_time']]
 # add 'sleep efficiency' column
 #dacs_all_sleep['sleep_efficiency']=dacs_all_sleep['sleep_duration']/dacs_all_sleep['bed_duration']
 # clean some useless columns
@@ -32,7 +32,7 @@ each_user_sleep_days = dacs_all_sleep.groupby('PID').size()
 ##################################################
 # Keep the "solitary residents", Regardless withdraw or not
 ###################################################
-solitary_list_intervention_group = pd.read_excel(r'D:\Sensor_Data_Processing\DACS_users_live_alone.xlsx')
+solitary_list_intervention_group = pd.read_excel(r'F:\Sensor_Data_Processing\DACS_users_live_alone.xlsx')
 
 # make sure they live alone
 solitary_list_intervention_group = solitary_list_intervention_group[solitary_list_intervention_group['living_arrangments']==1]
@@ -336,6 +336,7 @@ def get_sleep_parameter_with_date(reformed_sleep_list,sleep_para):
 temp_sleep_duration = get_sleep_parameter_with_date(reformed_sleep_list_no_nap,'TST(hour)')
 temp_sleep_efficiency = get_sleep_parameter_with_date(reformed_sleep_list_no_nap,'SE')
 temp_waso = get_sleep_parameter_with_date(reformed_sleep_list_no_nap,'WASO(min)')
+temp_sol = get_sleep_parameter_with_date(reformed_sleep_list_no_nap,'SOL(min)')
 
 def get_nap_parameter_with_date(reformed_sleep_list,sleep_para):
     temp_sleep_duration=[]
@@ -419,6 +420,7 @@ def one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_e
     return df_concat
 
 df_concat_TST = one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_end,period2_end,period3_end,temp_sleep_duration, 'TST(hour)')
+df_concat_SOL = one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_end,period2_end,period3_end,temp_sol, 'SOL(min)')
 df_concat_WASO = one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_end,period2_end,period3_end,temp_waso, 'WASO(min)')
 df_concat_SE = one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_end,period2_end,period3_end,temp_sleep_efficiency, 'SE')
 
@@ -429,7 +431,7 @@ df_concat_nap_count = one_sleep_para_all_users(period1_start,period2_start,perio
 
 #=============================================
 # get mobility, mobility is number of room transitions
-final_big_df = pd.read_excel(r'D:\Meeting Updates\sleep_mob_45_solitary_users.xlsx')
+final_big_df = pd.read_excel(r'F:\Sensor_Data_Processing\sleep_mob_45_solitary_users.xlsx')
 # group by PID
 mobility_grouped = list(final_big_df.groupby(['PID']))
 mobility_grouped_list=[]
@@ -438,7 +440,7 @@ for each in mobility_grouped:
     
 df_concat_mobility = one_sleep_para_all_users(period1_start,period2_start,period3_start,period1_end,period2_end,period3_end,mobility_grouped_list,'num_of_transition')
 
-#len(df_concat_mobility)==45
+# len(df_concat_mobility)==45 # should be True
 
 #############################################################################
 # Sleep start and end time by different periods
@@ -646,7 +648,7 @@ df_concat_end_time = one_period_end_time_all_users(period1_start,period2_start,
 ############################################################################
 # from users get their ages
 #############################################################################
-user_gender = pd.read_csv(r'D:\Sensor_Data_Processing\gender_label\survey_labels.csv')
+user_gender = pd.read_csv(r'F:\Sensor_Data_Processing\gender_label\survey_labels.csv')
 user_list_sleep=[]
 for i in range(len(reformed_sleep_list_no_nap)):
     user_list_sleep.append(reformed_sleep_list_no_nap[i]['PID'].tolist()[0])
@@ -658,7 +660,7 @@ user_gender['age'] = age_list
 user_gender = user_gender.sort_values(by=['record_id']).reset_index()
 user_gender['home_care_package_level'].loc[(user_gender['home_care_package_level']==6)] = 1
 # add mental score to user_gender
-user_mental_score = pd.read_csv(r'D:\Sensor_Data_Processing\gender_label\eq5d_and_mood_and_mental_scores.csv')
+user_mental_score = pd.read_csv(r'F:\Sensor_Data_Processing\gender_label\eq5d_and_mood_and_mental_scores.csv')
 user_mental_score = user_mental_score[user_mental_score['PID'].isin(user_gender['record_id'].tolist())]
 user_gender = user_gender.merge(user_mental_score,left_on='record_id',right_on='PID', 
      how = 'inner')[['record_id', 'living_area', 'home_care_package_level', 'gender',
@@ -670,13 +672,14 @@ user_gender['ATSM'] = [int(x) for x in user_gender['ATSM'].tolist()]
 #############################################################################
 #df = df_concat_TST.merge(df_concat_WASO, how="inner", left_index=True, right_index=True)
 #df = df.merge(df_concat_SE, how="inner", left_index=True, right_index=True)
+#df_concat_SOL
 #df_concat_end_time
 #df_concat_start_time
 # df_concat_mobility
 # df_concat_nap_duration
 # df_concat_nap_count
 # add mental score
-df=df_concat_mobility
+df=df_concat_SOL
 
 df = df[df.index.isin(user_gender['record_id'].tolist())]
 
@@ -687,7 +690,26 @@ joined_table = df.merge(user_gender_atsm_score,left_on=df.index,right_on='record
 joined_table = joined_table.rename({'ATSM': 'mental_score'}, axis=1)  
 
 # write table to excel
-joined_table.to_excel(r'D:\solitray_44_sleepers\mobility.xlsx',index=False)
+joined_table.to_excel(r'F:\solitray_44_sleepers\sol.xlsx',index=False)
+
+#############################################################################
+# keep users who have data within 2019-2020 NOV
+#############################################################################
+user_to_keep = pd.read_excel(r'D:\solitray_44_sleepers\32_signle_user_id.xlsx')
+user_gender_to_keep_33_people = user_gender[user_gender['record_id'].isin(user_to_keep['record_id'].tolist())]
+
+
+
+from statsmodels.stats.anova import AnovaRM
+
+para = 'TST(hour)'
+
+para_list=[]
+for each in reformed_sleep_list_no_nap:
+    para_list.append(each[para].tolist()[0])
+
+#perform the repeated measures ANOVA
+print(AnovaRM(data=df, depvar='response', subject='patient', within=['drug']).fit())
 
 
 #############################################################################
@@ -755,3 +777,4 @@ plot_SE_for_one_age_group(joined_table_70s_half_B,'Sleepers in their 70s')
 plot_SE_for_one_age_group(joined_table_80s_half_A,'Sleepers in their 80s')
 plot_SE_for_one_age_group(joined_table_80s_half_B,'Sleepers in their 80s')
 plot_SE_for_one_age_group(joined_table_90s,'Sleepers in their 90s')
+
