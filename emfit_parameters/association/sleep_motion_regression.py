@@ -10,21 +10,31 @@ from scikit_posthocs import posthoc_dunn
 import seaborn as sns
 from datetime import datetime
 import statsmodels.api as sm
-import merge_sensors as ms # make sure they are in same dir, run ms first
-
-import seaborn as sns
-
-from sklearn import linear_model
-from sklearn.model_selection import cross_val_score, cross_val_predict
-from sklearn import metrics
 
 #############################################################################
 # Topological floor plan
 #############################################################################
-from collections import ChainMap
 
 all_dacs_room_matrix = pd.read_csv(r'F:\Sensor_Data_Processing\floor_plan\DACS_Room_Distances.csv')
-room_matrix_grouped_list = list(all_dacs_room_matrix.groupby(['PID']))
+room_matrix_grouped_list = [item[1] for item in list(all_dacs_room_matrix.groupby(['PID']))]
+
+room_matrix_grouped_double_side_list = []
+for each_matrix_cleaned in room_matrix_grouped_list:
+    each_matrix_cleaned['PID'] = each_matrix_cleaned['PID'].str.replace('Mar','3')
+    room_matrix_grouped_double_side_list.append(each_matrix_cleaned)
+
+# expand room_matrix_grouped_double_side_list to a big df
+room_matrix_grouped_double_side_df = pd.DataFrame({})
+for each in room_matrix_grouped_double_side_list:
+    room_matrix_grouped_double_side_df = room_matrix_grouped_double_side_df.append(each)
+
+# get the user list from room_matrix_grouped_double_side_list
+room_matrix_users = [item['PID'].tolist()[0] for item in room_matrix_grouped_double_side_list ]
+
+
+#------------------------------------------
+# if we want to get a triangle topological floor plan
+from collections import ChainMap
 
 def getUniqueItems(d):
     result = {}
@@ -48,9 +58,9 @@ def remove_duplicate_rooms(unit_matrix):
     return aab 
 
 reformed_room_matrix_list_temp=[];room_matrix_users=[]    
-for each_unit in room_matrix_grouped_list:
-    unit_matrix = each_unit[1]
-    unit_matrix_cleaned = remove_duplicate_rooms(unit_matrix)    
+for unit_matrix in room_matrix_grouped_list:
+    unit_matrix_cleaned = remove_duplicate_rooms(unit_matrix)
+    unit_matrix_cleaned['PID'] = unit_matrix_cleaned['PID'].str.replace('Mar','3')
     reformed_room_matrix_list_temp.append(unit_matrix_cleaned)
     room_matrix_users.append(unit_matrix_cleaned['PID'].tolist()[0])
 
@@ -59,18 +69,7 @@ for each in reformed_room_matrix_list_temp:
     reformed_room_matrix_df = reformed_room_matrix_df.append(each)
 
 # group all users' floor plan
-output = [item[1] for item in list(reformed_room_matrix_df.groupby('PID'))]
-  
- 
-
-
-
-user_gender_users = user_gender['record_id'].tolist()
-# remove some users by find their index
-missing_users_in_sensor = list(set(room_matrix_users) - set(user_gender_users))
-reformed_room_matrix_df = reformed_room_matrix_df[~reformed_room_matrix_df['PID'].isin(missing_users_in_sensor)]
-
-
+all_user_floor_plan = [item[1] for item in list(reformed_room_matrix_df.groupby('PID'))]
 
 ###################################################
 # Sleep summary data: just use csv file
@@ -96,12 +95,15 @@ each_user_sleep_days = dacs_all_sleep.groupby('PID').size()
 
 
 ###################################################
-# Motion sensor: steps each day
+# Motion sensor to transition
 ###################################################
-all_dacs_mobility = pd.read_csv(r'F:\Sensor_Data_Processing\all_user_mobility_up_to_Aug.csv')
-all_dacs_mobility = all_dacs_mobility[['PID','localTimeMeasured','value']]
-# mobility has time format YY-MM-DD but sensor also has hours
-all_dacs_mobility['local_timestamp'] = [dt.datetime.strptime(date[0:-9], '%d/%m/%Y').date() for date in all_dacs_mobility['localTimeMeasured']] 
+data = pd.read_csv(r'F:\data\sensor_data_up_to_Nov.csv')
+
+#------------------------------------------------
+# remove the features that are not needed
+motion_data = data.drop(columns=['Unnamed: 0','room_id','sensor_type','timestamp'])
+# remove "chair" since this is for tranfer in ADL
+motion_data = motion_data[~motion_data['sensor_name'].str.contains('Chair')]
 
 ###################################################
 # Keep the "solitary residents", Regardless withdraw or not
@@ -116,28 +118,56 @@ solitary_users = solitary_list_intervention_group['record_id'].tolist()
 #------------------------------------------------
 # Remove non-solitary users from sensor and mobility data 
 solitary_dacs_sleep = dacs_all_sleep[dacs_all_sleep['PID'].isin(solitary_users)]
-solitary_dacs_mobility = all_dacs_mobility[all_dacs_mobility['PID'].isin(solitary_users)]
+solitary_dacs_sensor = motion_data[motion_data['PID'].isin(solitary_users)]
 
 # Check if PID in sleep is same as motion
 sleep_pid = solitary_dacs_sleep['PID'].unique().tolist()
-motion_pid = solitary_dacs_mobility['PID'].unique().tolist()
+motion_pid = solitary_dacs_sensor['PID'].unique().tolist()
 
 # for users not in motion_pid, we have to find them
 user_not_in_motion_pid = [elem for elem in motion_pid if elem not in sleep_pid]
 # remove these users from motion data
-solitary_dacs_mobility = solitary_dacs_mobility[~solitary_dacs_mobility['PID'].isin(user_not_in_motion_pid)]
+solitary_dacs_sensor = solitary_dacs_sensor[~solitary_dacs_sensor['PID'].isin(user_not_in_motion_pid)]
 
 ###################################################
 # Group sleep and motion sensor
 ###################################################
-# get mobility
-mobility_grouped_list = list(solitary_dacs_mobility.groupby(['PID']))
-reformed_mobility_list_temp = []
-for each_unit in mobility_grouped_list:
-    unit_motiondata = each_unit[1]
-    # remove all zeros in mobility
-    unit_motiondata = unit_motiondata[unit_motiondata['value']!= 0]
-    reformed_mobility_list_temp.append(unit_motiondata)
+# Delete the '0' signal in sensors, change the dataframe
+def reform_df(MotionData_ila):
+    MotionData_ila['sensor_value'] = pd.to_numeric(MotionData_ila['sensor_value'])
+    MotionData_ila = MotionData_ila[MotionData_ila['sensor_value'] == 1]
+    room_list = MotionData_ila['sensor_name'].unique().tolist()
+    # the original sensor id are too complicated, change them to 0,1,2,...
+    sensor_id = list(range(len(room_list)))
+
+    allRooms = MotionData_ila['sensor_name'].values.tolist()
+    temp=[]
+    for i in range(len(allRooms)):
+        for j in range(len(room_list)):
+            if allRooms[i]==room_list[j]:
+                temp.append(sensor_id[j])
+            
+    MotionData_ila['new_sensor_id'] = temp
+    
+    # up to this step, we have get the dataframe, but don't forget to convert to time object
+    datetime_list = []
+    time_list = MotionData_ila["local_timestamp"].values.tolist()
+    for elt in time_list:
+        elt = elt[0:19] # trim milli seconds
+        aa = dt.datetime.strptime(elt, '%Y-%m-%d %H:%M:%S')
+        datetime_list.append(aa)
+    MotionData_ila['exact_time'] = time_list         
+    
+    # Sort the datetime 
+    aaa = MotionData_ila.sort_values(by="exact_time") 
+    return aaa
+
+sensor_grouped_list = list(solitary_dacs_sensor.groupby(['PID']))
+reformed_sensor_list_temp=[]
+for each_PID in sensor_grouped_list:
+    PID_motiondata = each_PID[1]
+    reformed_each_df = reform_df(PID_motiondata)
+    reformed_sensor_list_temp.append(reformed_each_df)
 
 #-------------------------------------------------
 # get users in sleep data
@@ -145,14 +175,14 @@ sleep_grouped_list = list(solitary_dacs_sleep.groupby(['PID']))
 reformed_sleep_list_temp=[]
 for each_PID in sleep_grouped_list:
     reformed_sleep_list_temp.append(each_PID[1])
- 
+  
 #-------------------------------------------------
-# add a bdebugging function to compare whether PID in mobility and
+# add a bdebugging function to compare whether PID in motion and
 # sleep are the same   
 user_list_sleep=[];user_list_sensor=[]
-for i in range(len(reformed_mobility_list_temp)):
+for i in range(len(reformed_sensor_list_temp)):
     user_list_sleep.append(reformed_sleep_list_temp[i]['PID'].tolist()[0])
-    user_list_sensor.append(reformed_mobility_list_temp[i]['PID'].tolist()[0])
+    user_list_sensor.append(reformed_sensor_list_temp[i]['PID'].tolist()[0])
     
 def debugging_two_temp_list_value(a1,a2):
     '''
@@ -169,16 +199,281 @@ def debugging_two_temp_list_value(a1,a2):
 are_user_same = debugging_two_temp_list_value(user_list_sleep,user_list_sensor)
 
 #############################################################################
+# Match sensor/sleep PID with floor plan PID
+#############################################################################
+
+motion_sensor_user_list = [item[0] for item in list(solitary_dacs_sensor.groupby(['PID']))]
+# then take either room_matrix_user or all_user_floor_plan to match users
+# remove some users from floor plan df by find the missing PID in floor plan df
+missing_users_in_sensor = list(set(room_matrix_users) - set(motion_sensor_user_list))
+room_matrix_grouped_double_side_df = room_matrix_grouped_double_side_df[~room_matrix_grouped_double_side_df['PID'].isin(missing_users_in_sensor)]
+# Exactly 44 solitary users without ATSM < 7 have floor plan
+floor_plan_user_list = [item[0] for item in list(room_matrix_grouped_double_side_df.groupby(['PID']))]
+floor_plan_each_user = [item[1] for item in list(room_matrix_grouped_double_side_df.groupby(['PID']))]
+# the single side floor plan
+reformed_room_matrix_df = reformed_room_matrix_df[reformed_room_matrix_df['PID'].isin(floor_plan_user_list)]
+reformed_room_matrix_44_ppl = [item[1] for item in list(reformed_room_matrix_df.groupby(['PID']))]
+
+# get motion/sleep data from 44 people 
+solitary_dacs_sensor_44_ppl = solitary_dacs_sensor[solitary_dacs_sensor['PID'].isin(floor_plan_user_list)]
+solitary_dacs_sleep_44_ppl = solitary_dacs_sleep[solitary_dacs_sleep['PID'].isin(floor_plan_user_list)]
+
+motion_data_each_unit = [item[1] for item in list(solitary_dacs_sensor_44_ppl.groupby(['PID']))]
+motion_data_user_list = [item[0] for item in list(solitary_dacs_sensor_44_ppl.groupby(['PID']))]
+sleep_data_each_unit = [item[1] for item in list(solitary_dacs_sleep_44_ppl.groupby(['PID']))]
+sleep_data_user_list = [item[0] for item in list(solitary_dacs_sleep_44_ppl.groupby(['PID']))]
+
+# debug
+are_user_same = debugging_two_temp_list_value(floor_plan_user_list,sleep_data_user_list)
+
+
+#############################################################################
+# Get the num of room transition
+#############################################################################
+# Remove 'repetitive sensor' and 0,  this function only keeps the first record
+def remove_dup_df(motion_data):
+    # arrange the time in order
+    motion_data = motion_data.sort_values(by='local_timestamp')
+    # drop the duplicates in sensor_id
+    drop_dup_df = motion_data.loc[(motion_data['sensor_id'].shift() != motion_data['sensor_id'])]
+    # remove 0 signal
+    drop_dup_df = drop_dup_df[drop_dup_df['sensor_value'] == 1]
+    return drop_dup_df
+# Apply the above function 
+sensor_list=[]
+for each_PID in motion_data_each_unit:
+    cleaned_each_df = remove_dup_df(each_PID)
+    sensor_list.append(cleaned_each_df)
+
+#-----------------------------------------------------------------------------  
+# get daily room transition
+
+# find maximal and minimal snesors
+max_rooms=0
+min_rooms=len(sensor_list[0]['sensor_id'].unique().tolist())
+for each_user in sensor_list:
+    test_user_room_list = each_user['sensor_id'].unique().tolist()
+    if len(test_user_room_list) >= max_rooms:
+        max_rooms = len(test_user_room_list)
+    if len(test_user_room_list) < min_rooms:
+        min_rooms = len(test_user_room_list)
+# now we know max_rooms=15, min_rooms=7
+
+
+#-----------------------------------------------------------------------------  
+# Chopped datetime       
+base = dt.datetime.strptime('2019-01-01 00:00:00', '%Y-%m-%d %H:%M:%S')
+datelist = pd.date_range(base, periods=700).tolist()
+choppedTime=[]
+for elt in datelist:
+    strg = f'{elt:%Y-%m-%d %H:%M:%S}'
+    choppedTime.append(strg)
+start_time = choppedTime[0]
+end_time = choppedTime[-1]
+
+'''
+user_index=0
+test_user = sensor_list[user_index]
+test_user_floor_plan=floor_plan_each_user[user_index]
+test_user_room_matrix_single_side = reformed_room_matrix_44_ppl[user_index]
+
+distance_dictionary = get_distance_dict_from_floor_plan(test_user_floor_plan)
+
+# remove wardrobe and pantry
+test_user = test_user[~test_user['sensor_name'].str.contains('Pantry')]
+test_user = test_user[~test_user['sensor_name'].str.contains('Wardrobe')]
+
+# sum the steps
+transition=[]; date_list=[]
+PID = test_user['PID'].tolist()[0]
+first_date_in_cleaned_ila = test_user['local_timestamp'].tolist()[0]
+last_date_in_cleaned_ila = test_user['local_timestamp'].tolist()[-1]
+for i in range(len(choppedTime)-1):
+    chopped_one_day  = test_user[test_user['local_timestamp'] > choppedTime[i]]
+    chopped_day  = chopped_one_day[chopped_one_day['local_timestamp'] < choppedTime[i+1]]
+    # The chopped_day is length 0 before the start date
+    if first_date_in_cleaned_ila > choppedTime[i+1] or last_date_in_cleaned_ila < choppedTime[i]:
+        continue
+    # if there is one day missing, just let it go
+    if len(chopped_day)==0:
+        continue
+    
+    # starting time of each day's motion data is 6am
+    start_time_str = chopped_day['local_timestamp'].tolist()[0][0:10]+' 06:00:00'
+    chopped_day_morning_time  = chopped_day[chopped_day['local_timestamp'] > start_time_str]
+
+    if len(chopped_day_morning_time)==0:
+        continue
+
+
+    # get the labels from motion data
+    chopped_day_labelled_transition = labels_between_room(chopped_day_morning_time)
+    # Now match the motion data labels with distance dict and sum
+    steps = [distance_dictionary[key] for key in chopped_day_labelled_transition if key in distance_dictionary]
+    transition.append(sum(steps) )
+        
+    # get the date of this step
+    date_of_computed = chopped_day_morning_time['local_timestamp'].tolist()[0][0:10]
+    sensor_date = dt.datetime.strptime(date_of_computed, '%Y-%m-%d')
+    date_list.append(sensor_date)
+
+num_of_transition = pd.DataFrame({'PID':PID,'date':date_list, 'num_of_transition':transition})
+'''
+
+
+
+def get_distance_dict_from_floor_plan(test_user_room_matrix_double_side):
+    keys=[]; values=[]
+    for i in range(len(test_user_room_matrix_double_side)):
+        room_previous_sensor = test_user_room_matrix_double_side.iloc[i]['room1_name'] 
+        room_next_sensor =  test_user_room_matrix_double_side.iloc[i]['room2_name']
+        label = room_previous_sensor+' to '+room_next_sensor
+        keys.append(label)
+        values.append(test_user_room_matrix_double_side.iloc[i]['distance'])
+
+    dict_sensor_id = [{k: v} for k, v in zip(keys, values)]
+    distance_dictionary = {}
+    for each_dict in dict_sensor_id:
+        distance_dictionary.update(each_dict)
+    return distance_dictionary
+
+# dictionary for distance
+#distance_dictionary = get_distance_dict_from_floor_plan(test_user_floor_plan)
+
+
+def labels_between_room(cleaned_ila):
+    temp1=[]
+    for i in range(0, len(cleaned_ila)-1):
+        room_previous_sensor = cleaned_ila.iloc[i]['sensor_name'].strip()
+        room_next_sensor =  cleaned_ila.iloc[i+1]['sensor_name'].strip()
+        label = room_previous_sensor+' to '+room_next_sensor
+        temp1.append(label)
+    return temp1 # return a list
+
+# get_transition_arrays will give daily transition numbers
+def get_transition_arrays(test_user,choppedTime,distance_dictionary):
+    test_user = test_user[~test_user['sensor_name'].str.contains('Pantry')]
+    test_user = test_user[~test_user['sensor_name'].str.contains('Wardrobe')]
+
+    # sum the steps
+    transition=[]; date_list=[]
+    PID = test_user['PID'].tolist()[0]
+    
+    first_date_in_cleaned_ila = test_user['local_timestamp'].tolist()[0]
+    last_date_in_cleaned_ila = test_user['local_timestamp'].tolist()[-1]
+    for i in range(len(choppedTime)-1):
+        chopped_one_day  = test_user[test_user['local_timestamp'] > choppedTime[i]]
+        chopped_day  = chopped_one_day[chopped_one_day['local_timestamp'] < choppedTime[i+1]]
+        # The chopped_day is length 0 before the start date
+        if first_date_in_cleaned_ila > choppedTime[i+1] or last_date_in_cleaned_ila < choppedTime[i]:
+            continue
+        # if there is one day missing, just let it go
+        if len(chopped_day)==0:
+            continue
+    
+        # starting time of each day's motion data is 6am
+        start_time_str = chopped_day['local_timestamp'].tolist()[0][0:10]+' 06:00:00'
+        chopped_day_morning_time  = chopped_day[chopped_day['local_timestamp'] > start_time_str]
+        if len(chopped_day_morning_time)==0:
+            continue
+
+        # get the labels from motion data
+        chopped_day_labelled_transition = labels_between_room(chopped_day)
+        # Now match the motion data labels with distance dict and sum
+        steps = [distance_dictionary[key] for key in chopped_day_labelled_transition if key in distance_dictionary]
+        transition.append(sum(steps) )
+        
+        # get the date of this step
+        date_of_computed = chopped_day['local_timestamp'].tolist()[0][0:10]
+        sensor_date = dt.datetime.strptime(date_of_computed, '%Y-%m-%d')
+        date_list.append(sensor_date)
+
+    num_of_transition = pd.DataFrame({'PID':PID,'date':date_list, 'num_of_transition':transition})
+    
+    return num_of_transition
+
+
+### LONG COMPUTING TIME to get the dataframe: 4 min
+users_transition=[]
+for i in range(len(sensor_list)):
+    each_user = sensor_list[i]
+    each_user_double_side_floor_plan = floor_plan_each_user[i]
+    each_user_dict = get_distance_dict_from_floor_plan(each_user_double_side_floor_plan)
+    single_user_transition = get_transition_arrays(each_user,choppedTime,each_user_dict)
+    users_transition.append(single_user_transition) 
+
+
+
+#flat_transition = [item for sub_df in users_transition for item in sub_df['PID']]
+#print('length_flat_transition = ',  len(flat_transition))
+
+
+###################################################
+# Motion sensor: steps each day computed by CSIRO
+###################################################
+all_dacs_mobility = pd.read_csv(r'F:\Sensor_Data_Processing\all_user_mobility_up_to_Aug.csv')
+all_dacs_mobility = all_dacs_mobility[all_dacs_mobility['value']!=0 ]  
+all_dacs_mobility = all_dacs_mobility[['PID','localTimeMeasured','value']]
+# mobility has time format YY-MM-DD but sensor also has hours
+all_dacs_mobility['local_timestamp'] = [dt.datetime.strptime(date[0:-9], '%d/%m/%Y').date() for date in all_dacs_mobility['localTimeMeasured']] 
+# use motion_data_user_list to pick the users we need
+all_dacs_mobility = all_dacs_mobility[all_dacs_mobility['PID'].isin(motion_data_user_list)]
+
+#---------------------# Match CSIRO mobility dates with my mobility dates
+# Group user's mobility
+all_dacs_mobility_grouped = [item[1] for item in list(all_dacs_mobility.groupby(['PID']))]
+
+# dates that in users_transition but not in all_dacs_mobility_grouped
+matched_date_user_transition = []
+for i in range(len(all_dacs_mobility_grouped)):
+    each_mobility_my = users_transition[i]
+    each_mobility_my = each_mobility_my[each_mobility_my['num_of_transition']!=0]
+    each_mobility_csiro = all_dacs_mobility_grouped[i]
+    each_mobility_my['local_timestamp'] = [each_day.date() for each_day in each_mobility_my['date'].tolist()] 
+    each_PID_mobility_reformed = each_mobility_my[each_mobility_my['local_timestamp'].isin(each_mobility_csiro['local_timestamp'].tolist())]
+    matched_date_user_transition.append(each_PID_mobility_reformed)
+
+
+# debug individual PID's sleep and mobility dates
+'''
+i=5
+each_mobility_my = users_transition[i]
+each_mobility_my = each_mobility_my[each_mobility_my['num_of_transition']!=0]
+each_mobility_csiro = all_dacs_mobility_grouped[i]
+each_mobility_my['local_timestamp'] = [each_day.date() for each_day in each_mobility_my['date'].tolist()] 
+each_PID_mobility_reformed = each_mobility_my[each_mobility_my['local_timestamp'].isin(each_mobility_csiro['local_timestamp'].tolist())]
+
+
+print(len(each_PID_mobility_reformed), len(each_mobility_csiro))
+
+from collections import Counter
+l1 = each_mobility_csiro['local_timestamp'].tolist()
+l2 = each_PID_mobility_reformed['local_timestamp'].tolist()
+c1 = Counter(l1)
+c2 = Counter(l2)
+diff = c1-c2
+print(list(diff.elements()))
+'''
+
+# get list debugged
+matched_date_user_transition_list_length = [len(x) for x in matched_date_user_transition]
+all_dacs_mobility_grouped_list_length = [len(x) for x in all_dacs_mobility_grouped]
+# NOTE: we do not need two lists to have same length, since when remove 0 from csiro mobility, and remove 0 from my mobility
+# we only match my mobolity with csiro, we don't need to match CSIRO mobility with ours
+are_length_same = debugging_two_temp_list_value(matched_date_user_transition_list_length,all_dacs_mobility_grouped_list_length)
+
+
+#############################################################################
 # Remove repetitive dates of sleep recording 
 #############################################################################
 # follow Mahnoosh's suggestion in one user
 # split day-by-day, but not from 0am. Instead, split each day from 7pm 
 base = dt.datetime.strptime('2019-05-02 19:00:00', '%Y-%m-%d %H:%M:%S')
 datelist = pd.date_range(base, periods=580).tolist()
-choppedTime=[]
+choppedTime_sleep=[]
 for elt in datelist:
     strg = f'{elt:%Y-%m-%d %H:%M:%S}'
-    choppedTime.append(strg)
+    choppedTime_sleep.append(strg)
     
 #-----------------------------------------------------
 # split the sleep data day-by-day
@@ -250,17 +545,17 @@ def obtain_summary(sleep_episodes_list):
 
     
 # NOTE: we should use start_date ALL THE TIME, since end_date is not necessary
-def get_one_user_sleep_data(test_user,choppedTime):
+def get_one_user_sleep_data(test_user,choppedTime_sleep):
 
     first_date_in_this_user = test_user['start_date'].tolist()[0]
     last_date_in_this_user = test_user['start_date'].tolist()[-1]
 
     sleep_summary_one_person = pd.DataFrame({})
-    for i in range(len(choppedTime)-1):
-        one_day_sleep  = test_user[test_user['start_date'] > choppedTime[i]]
-        one_day_sleep  = one_day_sleep[one_day_sleep['start_date'] < choppedTime[i+1]]
+    for i in range(len(choppedTime_sleep)-1):
+        one_day_sleep  = test_user[test_user['start_date'] > choppedTime_sleep[i]]
+        one_day_sleep  = one_day_sleep[one_day_sleep['start_date'] < choppedTime_sleep[i+1]]
                
-        # e.g. choppedTime start  4-26, hence the choppedila_day is length 0 before the start date
+        # e.g. choppedTime_sleep start  4-26, hence the choppedila_day is length 0 before the start date
         if first_date_in_this_user > datelist[i+1] or last_date_in_this_user < datelist[i]:
             continue    
         if len(one_day_sleep)==0:
@@ -269,7 +564,7 @@ def get_one_user_sleep_data(test_user,choppedTime):
         # one_day_sleep is the records for this day, now 
         # 1. remove the start_date that not within 7pm-6am
         # 2. for the rest episodes, check if they have same start time
-        start_time = dt.datetime.strptime(choppedTime[i],'%Y-%m-%d %H:%M:%S')
+        start_time = dt.datetime.strptime(choppedTime_sleep[i],'%Y-%m-%d %H:%M:%S')
         one_day_sleep_with_episodes = keep_record_in_interval(one_day_sleep, start_time)
         if len(one_day_sleep_with_episodes)==0:
             continue
@@ -285,14 +580,14 @@ def get_one_user_sleep_data(test_user,choppedTime):
 
 #test_user = reformed_sleep_list_temp[18]
 #test_user = test_user.dropna(subset=['sleep_duration'])
-#sleep_summary_one_person = get_one_user_sleep_data(test_user,choppedTime)
+#sleep_summary_one_person = get_one_user_sleep_data(test_user,choppedTime_sleep)
 
 reformed_sleep_list_no_nap = []
-for test_user in reformed_sleep_list_temp:
+for test_user in sleep_data_each_unit:
     # drop rows with nan sleep_duration
     test_user = test_user.dropna(subset=['sleep_duration'])
     # apply function to merge multi-episodic sleep records
-    sleep_summary_one_person = get_one_user_sleep_data(test_user,choppedTime)
+    sleep_summary_one_person = get_one_user_sleep_data(test_user,choppedTime_sleep)
     reformed_sleep_list_no_nap.append(sleep_summary_one_person)
     
 #------------------
@@ -363,9 +658,10 @@ for each_user_sleep in reformed_sleep_list_no_repetitive:
 # Same, for each unit in reformed_sleep_list_with_no_repetitive and users_transition,remove the 
 # dates that in reformed_sleep_list_with_no_nap but not in users_transition
 reformed_sleep_list = [];reformed_sensor_list = []
-for i in range(len(reformed_mobility_list_temp)):
-    each_PID_mobility = reformed_mobility_list_temp[i]
+for i in range(len(matched_date_user_transition)):
+    each_PID_mobility = matched_date_user_transition[i]
     each_PID_sleep = reformed_sleep_list_no_repetead[i]
+    each_PID_mobility['local_timestamp'] = [each_day.date() for each_day in each_PID_mobility['date'].tolist()] 
 
     # match the days
     # mobility should within dates of sleep
@@ -379,18 +675,21 @@ for i in range(len(reformed_mobility_list_temp)):
 
 '''
 # debug individual PID's sleep and mobility dates
-each_PID_mobility = reformed_mobility_list_temp[15]
-each_PID_sleep = reformed_sleep_list_no_repetitive[15]
+each_PID_mobility = users_transition[0]
+each_PID_sleep = reformed_sleep_list_no_repetead[0]
+each_PID_mobility['local_timestamp'] = [each_day.date() for each_day in each_PID_mobility['date'].tolist()] 
 
 each_PID_mobility_reformed = each_PID_mobility[each_PID_mobility['local_timestamp'].isin(each_PID_sleep['date_for_this_sleep'].tolist())]
 each_PID_sleep_reformed = each_PID_sleep[each_PID_sleep['date_for_this_sleep'].isin(each_PID_mobility_reformed['local_timestamp'].tolist())]
+
+print(len(each_PID_mobility_reformed), len(each_PID_sleep_reformed))
 
 from collections import Counter
 l1 = each_PID_sleep_reformed['date_for_this_sleep'].tolist()
 l2 = each_PID_mobility_reformed['local_timestamp'].tolist()
 c1 = Counter(l1)
 c2 = Counter(l2)
-diff = c1-c2
+diff = c2-c1
 print(list(diff.elements()))
 '''
 
@@ -483,14 +782,14 @@ print('avg_of_sleep_duration =',avg_of_sleep_duration)
 
 
 user_index=1
-dates = list(range(len(reformed_sensor_list[user_index]['value'])))
+dates = list(range(len(reformed_sensor_list[user_index]['num_of_transition'])))
 x_labels_all = [date.strftime('%Y-%m-%d') for date in reformed_sensor_list[user_index]['local_timestamp'].tolist()]
 x_labels = x_labels_all[0:len(dates):10]
 xInput = list(range(0,len(dates),10))
 
 plt.figure(figsize=(12,10))
 plt.subplot(4,2,1)
-plt.plot(reformed_sensor_list[user_index]['value'].tolist(),
+plt.plot(reformed_sensor_list[user_index]['num_of_transition'].tolist(),
          color='r')
 #plt.plot(moving_average(reformed_sensor_list[user_index]['num_of_transition'].tolist(), n=7),label = '7-day moving average')
 plt.ylabel("mobility")
@@ -539,16 +838,16 @@ plt.legend()
 # see if they have any linear relationship by scatter plots
 plt.figure(figsize=(12,12))
 plt.subplot(2,2,1)
-plt.scatter(reformed_sensor_list[user_index]['value'].tolist(), temp_sleep_duration[user_index])
+plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_duration[user_index])
 plt.xlabel('mobility');plt.ylabel('total sleep duration (hour)')
 plt.subplot(2,2,2)
-plt.scatter(reformed_sensor_list[user_index]['value'].tolist(), temp_sleep_efficiency[user_index])
+plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_efficiency[user_index])
 plt.xlabel('mobility');plt.ylabel('sleep efficiency')
 plt.subplot(2,2,3)
-plt.scatter(reformed_sensor_list[user_index]['value'].tolist(), temp_sleep_onset_duration[user_index])
+plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_onset_duration[user_index])
 plt.xlabel('mobility');plt.ylabel('sleep onset duration (minute)')
 plt.subplot(2,2,4)
-plt.scatter(reformed_sensor_list[user_index]['value'].tolist(), temp_waso[user_index])
+plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_waso[user_index])
 plt.xlabel('mobility');plt.ylabel('wake after sleep onset duration (minute)')
 
 
@@ -556,15 +855,15 @@ plt.xlabel('mobility');plt.ylabel('wake after sleep onset duration (minute)')
 #############################################################################
 # From user_gender Dataframe, merge selected users' sleep and mobility
 #############################################################################
-user_45_PID=[]
-for each_user_sleep in reformed_sleep_list_no_nap:
-    user_45_PID.append( each_user_sleep['PID'].tolist()[0])
+user_44_PID_sleep=[each_user_sleep['PID'].tolist()[0] for each_user_sleep in reformed_sleep_list]
+user_44_PID_sensor=[each_user_sensor['PID'].tolist()[0] for each_user_sensor in reformed_sensor_list]
 
-# create 45 people's dataframe and later remove the unwanted 
+
+# create 44 people's dataframe and later remove the unwanted 
 final_big_df=pd.DataFrame({})    
-for i in range(len(user_45_PID)):
+for i in range(len(user_44_PID_sleep)):
     # combine mobility and sleep
-    mobility = reformed_sensor_list[i][['local_timestamp','value']]
+    mobility = reformed_sensor_list[i][['local_timestamp','num_of_transition']]
     sleep_features = reformed_sleep_list[i][['PID','start_sleep_time','finish_sleep_time',
                                         'TST(hour)','WASO(min)','SOL(min)','SE',
                                         'duraion_in_bed','toss_turn_count','avg_hr','avg_rr',
@@ -575,7 +874,7 @@ for i in range(len(user_45_PID)):
     final_big_df = pd.concat([final_big_df,merged_df])
 
 '''
-9188 rows for 45 people, 7900 rows for 37 people
+9117 for 44 ppl, 7853 rows for 37 people
 '''
 
 # remove the unwanted people
@@ -592,7 +891,7 @@ print(len(final_big_df))
 # Multivariate regression
 ######################################################
 # Samplping of data
-df = final_big_df[['PID','local_timestamp','value','TST(hour)','WASO(min)','SOL(min)','duraion_in_bed',
+df = final_big_df[['PID','local_timestamp','num_of_transition','TST(hour)','WASO(min)','SOL(min)','duraion_in_bed',
                     'SE','awake_count','avg_hr','avg_rr','age','gender']]
 # group by individuals
 a = list(df.groupby(['PID']))
@@ -602,35 +901,53 @@ for each in a:
     if len(test_user)>10:
         temp_store.append(test_user)
 
+# if SE is multiplied by 100
+temp_store_SE_100=[]
+for each in temp_store:
+    each['SE'] = each['SE']*100
+    temp_store_SE_100.append(each)
+       
+
+flat_temp_store_36_ppl = sum([len(each) for each in temp_store])
+print('flat_temp_store_36_ppl = ', flat_temp_store_36_ppl)
+'''
+7847 rows for 36 people
+'''
+
+# make temp_store a big merged df
+temp_store_merged_df=pd.DataFrame({})    
+for each in temp_store:
+    temp_store_merged_df = pd.concat([temp_store_merged_df,each])
+
 
 
 # see if they have any linear relationship by scatter plots
 user_index=17
 plt.figure(figsize=(12,6))
 plt.subplot(2,3,1)
-plt.scatter(reformed_sensor_list[user_index]['value'].tolist(), temp_sleep_duration[user_index])
+plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_duration[user_index])
 plt.xlabel('mobility');plt.ylabel('total sleep duration (hour)')
 plt.subplot(2,3,2)
-plt.scatter(reformed_sensor_list[user_index]['value'].tolist(), temp_sleep_efficiency[user_index])
+plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_efficiency[user_index])
 plt.xlabel('mobility');plt.ylabel('sleep efficiency')
 plt.subplot(2,3,3)
-plt.scatter(reformed_sensor_list[user_index]['value'].tolist(), temp_sleep_onset_duration[user_index])
+plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_onset_duration[user_index])
 plt.xlabel('mobility');plt.ylabel('sleep onset duration (minute)')
 plt.subplot(2,3,4)
-plt.scatter(reformed_sensor_list[user_index]['value'].tolist(), temp_waso[user_index])
+plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_waso[user_index])
 plt.xlabel('mobility');plt.ylabel('wake after sleep onset duration (minute)')
 plt.subplot(2,3,5)
-plt.scatter(reformed_sensor_list[user_index]['value'].tolist(), temp_sleep_duration_in_bed[user_index])
+plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_duration_in_bed[user_index])
 plt.xlabel('mobility');plt.ylabel('TIB (minute)')
 plt.subplot(2,3,6)
-plt.scatter(reformed_sensor_list[user_index]['value'].tolist(), temp_sleep_awakeCount[user_index])
+plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_awakeCount[user_index])
 plt.xlabel('mobility');plt.ylabel('Awake')
 
 
 # pearson or spearman plot
-test_user = temp_store[9][['value','TST(hour)','WASO(min)','SOL(min)','duraion_in_bed',
+test_user = temp_store[9][['num_of_transition','TST(hour)','WASO(min)','SOL(min)','duraion_in_bed',
                     'SE','awake_count']]
-test_user = test_user.rename(columns={"value": "mobility", "TST(hour)": "TST",'WASO(min)':'WASO',
+test_user = test_user.rename(columns={"num_of_transition": "mobility", "TST(hour)": "TST",'WASO(min)':'WASO',
                                       'SOL(min)':'SOL','duraion_in_bed':'TIB','awake_count':'Awake'})
 fig, ax = plt.subplots(figsize=(8,4))
 corr= test_user.corr(method='spearman').round(2)
@@ -642,51 +959,17 @@ sns.heatmap(corr, annot = True, cbar=False,mask=matrix,
             center= 0, cmap= 'coolwarm', square=True)
 plt.show()
 
-T=AAA()
-
-#==============================
-def get_sampling_dataset(temp_store_list,d):    
-# d: d is the day after sleep, d=1 means mobility is just after that day of sleep
-    each_user_sampled_list =[]
-    for each_user in temp_store_list:
-        each_user_mob = each_user.iloc[list(range(d,len(each_user))),[0,1,2]]
-        each_user_sleep = each_user.iloc[list(range(len(each_user)-d)),list(range(3,len(each_user.columns)))]
-        each_user_mob.reset_index(drop=True, inplace=True)
-        each_user_sleep.reset_index(drop=True, inplace=True)
-        each_user_sampled = pd.concat([each_user_mob, each_user_sleep], axis=1,ignore_index=True)
-        # up to this step, each_user_sampled miss the column name, so add columns name
-        each_user_sampled.columns = each_user.columns
-        each_user_sampled_list.append(each_user_sampled)
-        
-    # now put the list back to a big df 
-    final_big_df=pd.DataFrame({})    
-    for each in each_user_sampled_list:
-        each.reset_index(drop=True, inplace=True)
-        final_big_df = pd.concat([final_big_df,each])
-
-    return final_big_df
-     
-sampled_df_day_0 = get_sampling_dataset(temp_store,1)
-sampled_df_day_1 = get_sampling_dataset(temp_store,2)
-sampled_df_day_2 = get_sampling_dataset(temp_store,3)
-sampled_df_day_3 = get_sampling_dataset(temp_store,4)
-
 #############################################################################
 # Regression model
 #############################################################################
-
-X = test_user[['TST','Awake','SE']]
-Y = test_user['mobility']
+test_user=temp_store[5]
+X = test_user[['SE','TST(hour)','SOL(min)','WASO(min)','duraion_in_bed','awake_count']]
+Y = test_user['num_of_transition']
 model = sm.OLS(Y, X).fit()
-print(model.summary())
-
-plt.scatter(X,Y)
-
-fig = sm.graphics.plot_ccpr(model, "Awake")
+fig = sm.graphics.plot_ccpr(model, "WASO(min)")
 fig.tight_layout(pad=1.0)
 
-
-
+# NON-STEPWISE REGRESSION
 rsquared_adj_list=[]
 parameters_list=[]
 p_val_list=[]
@@ -695,7 +978,7 @@ age_list=[]
 gender_list=[]
 for test_user in temp_store:
     X = test_user[['SE','TST(hour)','SOL(min)','WASO(min)','duraion_in_bed','awake_count']]
-    Y = test_user['value']
+    Y = test_user['num_of_transition']
     model = sm.OLS(Y, X).fit()
     predictions = model.predict(X)
     rsquared_adj_list.append(model.rsquared_adj)
@@ -727,134 +1010,134 @@ OLS_result = pd.DataFrame({'age':age_list,'gender':gender_list,'data_points(days
 from sklearn.preprocessing import StandardScaler
 import statsmodels.formula.api as smf 
 class FeatureSelection(): 
-	def stepwise(self, df, response, intercept=False, normalize=False, criterion='rsquared_adj', f_pvalue_enter=.05, p_value_enter=.05, direction='backward', show_step=True, criterion_enter=None, criterion_remove=None, max_iter=200, **kw):
+	def stepwise(self, df, response, intercept=False, normalize=False, criterion='rsquared_adj', 
+              f_pvalue_enter=.05, p_value_enter=.05, direction='backward', show_step=True, 
+              criterion_enter=None, criterion_remove=None, max_iter=200, **kw):
 		"""
-		逐步回归。
-
-		参数
+		parameters of stepwise regression
 		----
 		df : dataframe
-			分析用数据框，response为第一列。
+			for data analysis, 'response' is the 1st column
 		response : str
-			回归分析相应变量。
-		intercept : bool, 默认是True
-			模型是否有截距项。
-		criterion : str, 默认是'bic'
-			逐步回归优化规则。
-		f_pvalue_enter : float, 默认是.05
-			当选择criterion=’ssr‘时，模型加入或移除变量的f_pvalue阈值。
-		p_value_enter : float, 默认是.05
-			当选择derection=’both‘时，移除变量的pvalue阈值。
-		direction : str, 默认是'backward'
-			逐步回归方向。
-		show_step : bool, 默认是True
-			是否显示逐步回归过程。
-		criterion_enter : float, 默认是None
-			当选择derection=’both‘或'forward'时，模型加入变量的相应的criterion阈值。
-		criterion_remove : float, 默认是None
-			当选择derection='backward'时，模型移除变量的相应的criterion阈值。
-		max_iter : int, 默认是200
-			模型最大迭代次数。
+			the variables in regression model
+		intercept : bool, default is True
+			if the model has intercept
+		criterion : str, default 'bic'
+			the rule of stepwise regression
+		f_pvalue_enter : float, default is 0.05
+			when set criterion='ssr', the model add/remove the threshold of the varaible's f_pvalue
+		p_value_enter : float, default is 0.05
+			when set derection='both'，remove threshold of the varaible's pvalue
+		direction : str, default is 'backward'
+			direction of stepwise regression
+		show_step : bool, default is True
+			show steps of stepwise regression
+		criterion_enter : float, default is None
+			when set derection='both' or 'forward', the model add varaible's threshold criterion
+		criterion_remove : float, default is None
+			when set derection='backward', the model remove varaible's threshold criterion
+		max_iter : int, default is 200
+			the meximal interation number of the model
 		"""
 		criterion_list = ['bic', 'aic', 'ssr', 'rsquared', 'rsquared_adj']
 		if criterion not in criterion_list:
-			raise IOError('请输入正确的criterion, 必须是以下内容之一：', '\n', criterion_list)
+			raise IOError('please enter correct criterion, it has to be:', '\n', criterion_list)
 
 		direction_list = ['backward', 'forward', 'both']
 		if direction not in direction_list:
-			raise IOError('请输入正确的direction, 必须是以下内容之一：', '\n', direction_list)
+			raise IOError('please enter correct direction, it has to be:', '\n', direction_list)
 
-		# 默认p_enter参数
+		# default p_enter
 		p_enter = {'bic': 0.0, 'aic': 0.0, 'ssr': 0.05, 'rsquared': 0.05, 'rsquared_adj': -0.05}
-		if criterion_enter:  # 如果函数中对p_remove相应key传参，则变更该参数
+		if criterion_enter:  
 			p_enter[criterion] = criterion_enter
 
-		# 默认p_remove参数
+		# default p_remove
 		p_remove = {'bic': 0.01, 'aic': 0.01, 'ssr': 0.1, 'rsquared': 0.05, 'rsquared_adj': -0.05}
-		if criterion_remove:  # 如果函数中对p_remove相应key传参，则变更该参数
+		if criterion_remove:  
 			p_remove[criterion] = criterion_remove
 
-		if normalize:  # 如果需要标准化数据
-			intercept = False  # 截距强制设置为0
+		if normalize:  # if we need normalized data
+			intercept = False  # set intercept = 0
 			df_std = StandardScaler().fit_transform(df)
 			df = pd.DataFrame(df_std, columns=df.columns, index=df.index)
 
 		""" forward """
 		if direction == 'forward':
-			remaining = list(df.columns)  # 自变量集合
+			remaining = list(df.columns)  # variables to be modeled
 			remaining.remove(response)
-			selected = []  # 初始化选入模型的变量列表
-			# 初始化当前评分,最优新评分
-			if intercept:  # 是否有截距
+			selected = []  # list of selected variables
+			# initialize the score
+			if intercept: 
 				formula = "{} ~ {} + 1".format(response, remaining[0])
 			else:
 				formula = "{} ~ {} - 1".format(response, remaining[0])
 
-			result = smf.ols(formula, df).fit()  # 最小二乘法回归模型拟合
+			result = smf.ols(formula, df).fit()  # OLS regression model
 			current_score = eval('result.' + criterion)
 			best_new_score = eval('result.' + criterion)
 
 			if show_step:
 				print('\nstepwise starting:\n')
 			iter_times = 0
-			# 当变量未剔除完，并且当前评分更新时进行循环
+			# when var are not finishing removing yet, we need loop to update the latest scores 
 			while remaining and (current_score == best_new_score) and (iter_times < max_iter):
-				scores_with_candidates = []  # 初始化变量以及其评分列表
-				for candidate in remaining:  # 在未剔除的变量中每次选择一个变量进入模型，如此循环
-					if intercept:  # 是否有截距
+				scores_with_candidates = []  # initialize scores and variables as candidates
+				for candidate in remaining:  # loop the variables that are not removed into the model
+					if intercept: 
 						formula = "{} ~ {} + 1".format(response, ' + '.join(selected + [candidate]))
 					else:
 						formula = "{} ~ {} - 1".format(response, ' + '.join(selected + [candidate]))
 
-					result = smf.ols(formula, df).fit()  # 最小二乘法回归模型拟合
+					result = smf.ols(formula, df).fit()  
 					fvalue = result.fvalue
 					f_pvalue = result.f_pvalue
 					score = eval('result.' + criterion)
-					scores_with_candidates.append((score, candidate, fvalue, f_pvalue))  # 记录此次循环的变量、评分列表
+					scores_with_candidates.append((score, candidate, fvalue, f_pvalue))  # store this loop's variables and scores
 
-				if criterion == 'ssr':  # 这几个指标取最小值进行优化
-					scores_with_candidates.sort(reverse=True)  # 对评分列表进行降序排序
-					best_new_score, best_candidate, best_new_fvalue, best_new_f_pvalue = scores_with_candidates.pop()  # 提取最小分数及其对应变量
+				if criterion == 'ssr':  # optimize the criterion by taking minimal values
+					scores_with_candidates.sort(reverse=True)  # soret scores in descending order
+					best_new_score, best_candidate, best_new_fvalue, best_new_f_pvalue = scores_with_candidates.pop()  # get minimal score and its corresponding variable
 					if ((current_score - best_new_score) > p_enter[criterion]) and (
-							best_new_f_pvalue < f_pvalue_enter):  # 如果当前评分大于最新评分
-						remaining.remove(best_candidate)  # 从剩余未评分变量中剔除最新最优分对应的变量
-						selected.append(best_candidate)  # 将最新最优分对应的变量放入已选变量列表
-						current_score = best_new_score  # 更新当前评分
-						if show_step:  # 是否显示逐步回归过程
+							best_new_f_pvalue < f_pvalue_enter):  # if cuurent score larger than latest score
+						remaining.remove(best_candidate)  # remove the lestest varaible from variable list
+						selected.append(best_candidate)  # put the lestest varaible into selected variable list 
+						current_score = best_new_score  # update score
+						if show_step: 
 							print('Adding %s, SSR = %.3f, Fstat = %.3f, FpValue = %.3e' %
 								  (best_candidate, best_new_score, best_new_fvalue, best_new_f_pvalue))
 					elif (current_score - best_new_score) >= 0 and (
-							best_new_f_pvalue < f_pvalue_enter) and iter_times == 0:  # 当评分差大于等于0，且为第一次迭代
+							best_new_f_pvalue < f_pvalue_enter) and iter_times == 0:  # when difference of scores >=0 and it is 1st iteration
 						remaining.remove(best_candidate)
 						selected.append(best_candidate)
 						current_score = best_new_score
-						if show_step:  # 是否显示逐步回归过程
+						if show_step:  
 							print('Adding %s, %s = %.3f' % (best_candidate, criterion, best_new_score))
-					elif (best_new_f_pvalue < f_pvalue_enter) and iter_times == 0:  # 当评分差小于p_enter，且为第一次迭代
+					elif (best_new_f_pvalue < f_pvalue_enter) and iter_times == 0:  # when difference of scores < p_enter and it is 1st iteration
 						selected.append(remaining[0])
 						remaining.remove(remaining[0])
-						if show_step:  # 是否显示逐步回归过程
+						if show_step: 
 							print('Adding %s, %s = %.3f' % (remaining[0], criterion, best_new_score))
-				elif criterion in ['bic', 'aic']:  # 这几个指标取最小值进行优化
-					scores_with_candidates.sort(reverse=True)  # 对评分列表进行降序排序
-					best_new_score, best_candidate, best_new_fvalue, best_new_f_pvalue = scores_with_candidates.pop()  # 提取最小分数及其对应变量
-					if (current_score - best_new_score) > p_enter[criterion]:  # 如果当前评分大于最新评分
-						remaining.remove(best_candidate)  # 从剩余未评分变量中剔除最新最优分对应的变量
-						selected.append(best_candidate)  # 将最新最优分对应的变量放入已选变量列表
-						current_score = best_new_score  # 更新当前评分
+				elif criterion in ['bic', 'aic']:  # take the minimal values from these criteria
+					scores_with_candidates.sort(reverse=True)  
+					best_new_score, best_candidate, best_new_fvalue, best_new_f_pvalue = scores_with_candidates.pop()  
+					if (current_score - best_new_score) > p_enter[criterion]:  
+						remaining.remove(best_candidate)  
+						selected.append(best_candidate) 
+						current_score = best_new_score  
 						# print(iter_times)
-						if show_step:  # 是否显示逐步回归过程
+						if show_step:  
 							print('Adding %s, %s = %.3f' % (best_candidate, criterion, best_new_score))
-					elif (current_score - best_new_score) >= 0 and iter_times == 0:  # 当评分差大于等于0，且为第一次迭代
+					elif (current_score - best_new_score) >= 0 and iter_times == 0:  # when difference of scores >= 0 and it is 1st iteration
 						remaining.remove(best_candidate)
 						selected.append(best_candidate)
 						current_score = best_new_score
-						if show_step:  # 是否显示逐步回归过程
+						if show_step: 
 							print('Adding %s, %s = %.3f' % (best_candidate, criterion, best_new_score))
-					elif iter_times == 0:  # 当评分差小于p_enter，且为第一次迭代
+					elif iter_times == 0:  # when difference of scores < p_enter and it is 1st iteration
 						selected.append(remaining[0])
 						remaining.remove(remaining[0])
-						if show_step:  # 是否显示逐步回归过程
+						if show_step:  
 							print('Adding %s, %s = %.3f' % (remaining[0], criterion, best_new_score))
 				else:
 					scores_with_candidates.sort()
@@ -864,84 +1147,82 @@ class FeatureSelection():
 						selected.append(best_candidate)
 						current_score = best_new_score
 						print(iter_times, flush=True)
-						if show_step:  # 是否显示逐步回归过程
+						if show_step: 
 							print('Adding %s, %s = %.3f' % (best_candidate, criterion, best_new_score))
-					elif (best_new_score - current_score) >= 0 and iter_times == 0:  # 当评分差大于等于0，且为第一次迭代
+					elif (best_new_score - current_score) >= 0 and iter_times == 0:  # when difference of scores >= 0 and it is 1st iteration
 						remaining.remove(best_candidate)
 						selected.append(best_candidate)
 						current_score = best_new_score
-						if show_step:  # 是否显示逐步回归过程
+						if show_step:  
 							print('Adding %s, %s = %.3f' % (best_candidate, criterion, best_new_score))
-					elif iter_times == 0:  # 当评分差小于p_enter，且为第一次迭代
+					elif iter_times == 0:  # when difference of scores < p_enter and it is 1st iteration
 						selected.append(remaining[0])
 						remaining.remove(remaining[0])
-						if show_step:  # 是否显示逐步回归过程
+						if show_step:  
 							print('Adding %s, %s = %.3f' % (remaining[0], criterion, best_new_score))
 				iter_times += 1
 
-			if intercept:  # 是否有截距
+			if intercept:  
 				formula = "{} ~ {} + 1".format(response, ' + '.join(selected))
 			else:
 				formula = "{} ~ {} - 1".format(response, ' + '.join(selected))
 
-			self.stepwise_model = smf.ols(formula, df).fit()  # 最优模型拟合
+			self.stepwise_model = smf.ols(formula, df).fit() 
 
-			if show_step:  # 是否显示逐步回归过程
+			if show_step: 
 				print('\nLinear regression model:', '\n  ', self.stepwise_model.model.formula)
 				print('\n', self.stepwise_model.summary())
 
 		""" backward """
 		if direction == 'backward':
-			remaining, selected = set(df.columns), set(df.columns)  # 自变量集合
+			remaining, selected = set(df.columns), set(df.columns) # variables to be modeled
 			remaining.remove(response)
-			selected.remove(response)  # 初始化选入模型的变量列表
-			# 初始化当前评分,最优新评分
-			if intercept:  # 是否有截距
+			selected.remove(response)  
+			if intercept:  
 				formula = "{} ~ {} + 1".format(response, ' + '.join(selected))
 			else:
 				formula = "{} ~ {} - 1".format(response, ' + '.join(selected))
 
-			result = smf.ols(formula, df).fit()  # 最小二乘法回归模型拟合
+			result = smf.ols(formula, df).fit()  
 			current_score = eval('result.' + criterion)
 			worst_new_score = eval('result.' + criterion)
 
 			if show_step:
 				print('\nstepwise starting:\n')
 			iter_times = 0
-			# 当变量未剔除完，并且当前评分更新时进行循环
 			while remaining and (current_score == worst_new_score) and (iter_times < max_iter):
-				scores_with_eliminations = []  # 初始化变量以及其评分列表
-				for elimination in remaining:  # 在未剔除的变量中每次选择一个变量进入模型，如此循环
-					if intercept:  # 是否有截距
+				scores_with_eliminations = []  
+				for elimination in remaining: 
+					if intercept:  
 						formula = "{} ~ {} + 1".format(response, ' + '.join(selected - set(elimination)))
 					else:
 						formula = "{} ~ {} - 1".format(response, ' + '.join(selected - set(elimination)))
 
-					result = smf.ols(formula, df).fit()  # 最小二乘法回归模型拟合
+					result = smf.ols(formula, df).fit()  
 					fvalue = result.fvalue
 					f_pvalue = result.f_pvalue
 					score = eval('result.' + criterion)
-					scores_with_eliminations.append((score, elimination, fvalue, f_pvalue))  # 记录此次循环的变量、评分列表
+					scores_with_eliminations.append((score, elimination, fvalue, f_pvalue)) 
 
-				if criterion == 'ssr':  # 这几个指标取最小值进行优化
-					scores_with_eliminations.sort(reverse=False)  # 对评分列表进行降序排序
-					worst_new_score, worst_elimination, worst_new_fvalue, worst_new_f_pvalue = scores_with_eliminations.pop()  # 提取最小分数及其对应变量
+				if criterion == 'ssr':  
+					scores_with_eliminations.sort(reverse=False) 
+					worst_new_score, worst_elimination, worst_new_fvalue, worst_new_f_pvalue = scores_with_eliminations.pop()  
 					if ((worst_new_score - current_score) < p_remove[criterion]) and (
-							worst_new_f_pvalue < f_pvalue_enter):  # 如果当前评分大于最新评分
-						remaining.remove(worst_elimination)  # 从剩余未评分变量中剔除最新最优分对应的变量
-						selected.remove(worst_elimination)  # 从已选变量列表中剔除最新最优分对应的变量
-						current_score = worst_new_score  # 更新当前评分
-						if show_step:  # 是否显示逐步回归过程
+							worst_new_f_pvalue < f_pvalue_enter): 
+						remaining.remove(worst_elimination)  
+						selected.remove(worst_elimination) 
+						current_score = worst_new_score  
+						if show_step: 
 							print('Removing %s, SSR = %.3f, Fstat = %.3f, FpValue = %.3e' %
 								  (worst_elimination, worst_new_score, worst_new_fvalue, worst_new_f_pvalue))
-				elif criterion in ['bic', 'aic']:  # 这几个指标取最小值进行优化
-					scores_with_eliminations.sort(reverse=False)  # 对评分列表进行降序排序
-					worst_new_score, worst_elimination, worst_new_fvalue, worst_new_f_pvalue = scores_with_eliminations.pop()  # 提取最小分数及其对应变量
-					if (worst_new_score - current_score) < p_remove[criterion]:  # 如果评分变动不显著
-						remaining.remove(worst_elimination)  # 从剩余未评分变量中剔除最新最优分对应的变量
-						selected.remove(worst_elimination)  # 从已选变量列表中剔除最新最优分对应的变量
-						current_score = worst_new_score  # 更新当前评分
-						if show_step:  # 是否显示逐步回归过程
+				elif criterion in ['bic', 'aic']:  
+					scores_with_eliminations.sort(reverse=False)  
+					worst_new_score, worst_elimination, worst_new_fvalue, worst_new_f_pvalue = scores_with_eliminations.pop()  
+					if (worst_new_score - current_score) < p_remove[criterion]:  # if the score change is not significant
+						remaining.remove(worst_elimination)  
+						selected.remove(worst_elimination)  
+						current_score = worst_new_score  
+						if show_step: 
 							print('Removing %s, %s = %.3f' % (worst_elimination, criterion, worst_new_score))
 				else:
 					scores_with_eliminations.sort(reverse=True)
@@ -950,143 +1231,141 @@ class FeatureSelection():
 						remaining.remove(worst_elimination)
 						selected.remove(worst_elimination)
 						current_score = worst_new_score
-						if show_step:  # 是否显示逐步回归过程
+						if show_step:  
 							print('Removing %s, %s = %.3f' % (worst_elimination, criterion, worst_new_score))
 				iter_times += 1
 
-			if intercept:  # 是否有截距
+			if intercept:  
 				formula = "{} ~ {} + 1".format(response, ' + '.join(selected))
 			else:
 				formula = "{} ~ {} - 1".format(response, ' + '.join(selected))
 
-			self.stepwise_model = smf.ols(formula, df).fit()  # 最优模型拟合
+			self.stepwise_model = smf.ols(formula, df).fit()  
 
-			if show_step:  # 是否显示逐步回归过程
+			if show_step:  
 				print('\nLinear regression model:', '\n  ', self.stepwise_model.model.formula)
 				print('\n', self.stepwise_model.summary())
 
 		""" both """
 		if direction == 'both':
-			remaining = list(df.columns)  # 自变量集合
+			remaining = list(df.columns) # variables to be modeled
 			remaining.remove(response)
-			selected = []  # 初始化选入模型的变量列表
-			# 初始化当前评分,最优新评分
-			if intercept:  # 是否有截距
+			selected = []  
+			if intercept:  
 				formula = "{} ~ {} + 1".format(response, remaining[0])
 			else:
 				formula = "{} ~ {} - 1".format(response, remaining[0])
 
-			result = smf.ols(formula, df).fit()  # 最小二乘法回归模型拟合
+			result = smf.ols(formula, df).fit()  
 			current_score = eval('result.' + criterion)
 			best_new_score = eval('result.' + criterion)
 
 			if show_step:
 				print('\nstepwise starting:\n')
-			# 当变量未剔除完，并且当前评分更新时进行循环
 			iter_times = 0
 			while remaining and (current_score == best_new_score) and (iter_times < max_iter):
-				scores_with_candidates = []  # 初始化变量以及其评分列表
-				for candidate in remaining:  # 在未剔除的变量中每次选择一个变量进入模型，如此循环
-					if intercept:  # 是否有截距
+				scores_with_candidates = []  
+				for candidate in remaining:  
+					if intercept:  
 						formula = "{} ~ {} + 1".format(response, ' + '.join(selected + [candidate]))
 					else:
 						formula = "{} ~ {} - 1".format(response, ' + '.join(selected + [candidate]))
 
-					result = smf.ols(formula, df).fit()  # 最小二乘法回归模型拟合
+					result = smf.ols(formula, df).fit()  
 					fvalue = result.fvalue
 					f_pvalue = result.f_pvalue
 					score = eval('result.' + criterion)
-					scores_with_candidates.append((score, candidate, fvalue, f_pvalue))  # 记录此次循环的变量、评分列表
+					scores_with_candidates.append((score, candidate, fvalue, f_pvalue)) 
 
-				if criterion == 'ssr':  # 这几个指标取最小值进行优化
-					scores_with_candidates.sort(reverse=True)  # 对评分列表进行降序排序
-					best_new_score, best_candidate, best_new_fvalue, best_new_f_pvalue = scores_with_candidates.pop()    # 提取最小分数及其对应变量
+				if criterion == 'ssr':  
+					scores_with_candidates.sort(reverse=True) 
+					best_new_score, best_candidate, best_new_fvalue, best_new_f_pvalue = scores_with_candidates.pop()    
 					if ((current_score - best_new_score) > p_enter[criterion]) and (
-							best_new_f_pvalue < f_pvalue_enter):  # 如果当前评分大于最新评分
-						remaining.remove(best_candidate)  # 从剩余未评分变量中剔除最新最优分对应的变量
-						selected.append(best_candidate)  # 将最新最优分对应的变量放入已选变量列表
-						current_score = best_new_score  # 更新当前评分
-						if show_step:  # 是否显示逐步回归过程
+							best_new_f_pvalue < f_pvalue_enter):  
+						remaining.remove(best_candidate)  
+						selected.append(best_candidate)  
+						current_score = best_new_score  
+						if show_step: 
 							print('Adding %s, SSR = %.3f, Fstat = %.3f, FpValue = %.3e' %
 								  (best_candidate, best_new_score, best_new_fvalue, best_new_f_pvalue))
 					elif (current_score - best_new_score) >= 0 and (
-							best_new_f_pvalue < f_pvalue_enter) and iter_times == 0:  # 当评分差大于等于0，且为第一次迭代
+							best_new_f_pvalue < f_pvalue_enter) and iter_times == 0:  
 						remaining.remove(best_candidate)
 						selected.append(best_candidate)
 						current_score = best_new_score
-						if show_step:  # 是否显示逐步回归过程
+						if show_step:  
 							print('Adding %s, %s = %.3f' % (best_candidate, criterion, best_new_score))
-					elif (best_new_f_pvalue < f_pvalue_enter) and iter_times == 0:  # 当评分差小于p_enter，且为第一次迭代
+					elif (best_new_f_pvalue < f_pvalue_enter) and iter_times == 0: 
 						selected.append(remaining[0])
 						remaining.remove(remaining[0])
-						if show_step:  # 是否显示逐步回归过程
+						if show_step:  
 							print('Adding %s, %s = %.3f' % (remaining[0], criterion, best_new_score))
-				elif criterion in ['bic', 'aic']:  # 这几个指标取最小值进行优化
-					scores_with_candidates.sort(reverse=True)  # 对评分列表进行降序排序
-					best_new_score, best_candidate, best_new_fvalue, best_new_f_pvalue = scores_with_candidates.pop()  # 提取最小分数及其对应变量
-					if (current_score - best_new_score) > p_enter[criterion]:  # 如果当前评分大于最新评分
-						remaining.remove(best_candidate)  # 从剩余未评分变量中剔除最新最优分对应的变量
-						selected.append(best_candidate)  # 将最新最优分对应的变量放入已选变量列表
-						current_score = best_new_score  # 更新当前评分
-						if show_step:  # 是否显示逐步回归过程
+				elif criterion in ['bic', 'aic']:  
+					scores_with_candidates.sort(reverse=True)  
+					best_new_score, best_candidate, best_new_fvalue, best_new_f_pvalue = scores_with_candidates.pop()  
+					if (current_score - best_new_score) > p_enter[criterion]: 
+						remaining.remove(best_candidate)  
+						selected.append(best_candidate)  
+						current_score = best_new_score  
+						if show_step: 
 							print('Adding %s, %s = %.3f' % (best_candidate, criterion, best_new_score))
-					elif (current_score - best_new_score) >= 0 and iter_times == 0:  # 当评分差大于等于0，且为第一次迭代
+					elif (current_score - best_new_score) >= 0 and iter_times == 0:  # when difference of scores >= 0 and it is 1st iteration
 						remaining.remove(best_candidate)
 						selected.append(best_candidate)
 						current_score = best_new_score
-						if show_step:  # 是否显示逐步回归过程
+						if show_step: 
 							print('Adding %s, %s = %.3f' % (best_candidate, criterion, best_new_score))
-					elif iter_times == 0:  # 当评分差小于p_enter，且为第一次迭代
+					elif iter_times == 0:  # when difference of scores < p_enter and it is 1st iteration
 						selected.append(remaining[0])
 						remaining.remove(remaining[0])
-						if show_step:  # 是否显示逐步回归过程
+						if show_step:  
 							print('Adding %s, %s = %.3f' % (remaining[0], criterion, best_new_score))
 				else:
 					scores_with_candidates.sort()
 					best_new_score, best_candidate, best_new_fvalue, best_new_f_pvalue = scores_with_candidates.pop()
-					if (best_new_score - current_score) > p_enter[criterion]:  # 当评分差大于p_enter
+					if (best_new_score - current_score) > p_enter[criterion]:  # # when difference of scores > p_enter
 						remaining.remove(best_candidate)
 						selected.append(best_candidate)
 						current_score = best_new_score
-						if show_step:  # 是否显示逐步回归过程
+						if show_step: 
 							print('Adding %s, %s = %.3f' % (best_candidate, criterion, best_new_score))
-					elif (best_new_score - current_score) >= 0 and iter_times == 0:  # 当评分差大于等于0，且为第一次迭代
+					elif (best_new_score - current_score) >= 0 and iter_times == 0:  # when difference of scores >= 0 and it is 1st iteration
 						remaining.remove(best_candidate)
 						selected.append(best_candidate)
 						current_score = best_new_score
-						if show_step:  # 是否显示逐步回归过程
+						if show_step:  
 							print('Adding %s, %s = %.3f' % (best_candidate, criterion, best_new_score))
-					elif iter_times == 0:  # 当评分差小于p_enter，且为第一次迭代
+					elif iter_times == 0:  # when difference of scores < p_enter and it is 1st iteration
 						selected.append(remaining[0])
 						remaining.remove(remaining[0])
-						if show_step:  # 是否显示逐步回归过程
+						if show_step: 
 							print('Adding %s, %s = %.3f' % (remaining[0], criterion, best_new_score))
 
-				if intercept:  # 是否有截距
+				if intercept: 
 					formula = "{} ~ {} + 1".format(response, ' + '.join(selected))
 				else:
 					formula = "{} ~ {} - 1".format(response, ' + '.join(selected))
 
-				result = smf.ols(formula, df).fit()  # 最优模型拟合
-				if iter_times >= 1:  # 当第二次循环时判断变量的pvalue是否达标
+				result = smf.ols(formula, df).fit()  
+				if iter_times >= 1:  # check variables's p-value is significant or not when in 2nd loop
 					if result.pvalues.max() > p_value_enter:
 						var_removed = result.pvalues[result.pvalues == result.pvalues.max()].index[0]
 						p_value_removed = result.pvalues[result.pvalues == result.pvalues.max()].values[0]
 						selected.remove(result.pvalues[result.pvalues == result.pvalues.max()].index[0])
-						if show_step:  # 是否显示逐步回归过程
+						if show_step:  
 							print('Removing %s, Pvalue = %.3f' % (var_removed, p_value_removed))
 				iter_times += 1
 
-			if intercept:  # 是否有截距
+			if intercept:  
 				formula = "{} ~ {} + 1".format(response, ' + '.join(selected))
 			else:
 				formula = "{} ~ {} - 1".format(response, ' + '.join(selected))
 
-			self.stepwise_model = smf.ols(formula, df).fit()  # 最优模型拟合
-			if show_step:  # 是否显示逐步回归过程
+			self.stepwise_model = smf.ols(formula, df).fit()  
+			if show_step: 
 				print('\nLinear regression model:', '\n  ', self.stepwise_model.model.formula)
 				print('\n', self.stepwise_model.summary())
-				# 最终模型选择的变量
+				# final variables selected
 		if intercept:
 			self.stepwise_feat_selected_ = list(self.stepwise_model.params.index[1:])
 		else:
@@ -1099,14 +1378,15 @@ valid_len=[]
 p_val_list=[]
 age_list=[]
 gender_list=[]
-for test_user in temp_store:
-    df = pd.DataFrame({'mobility':test_user.loc[:, 'value'],'TST':test_user.loc[:, 'TST(hour)'],
+for test_user in temp_store_SE_100:
+    df = pd.DataFrame({'mobility':test_user.loc[:, 'num_of_transition'],'TST':test_user.loc[:, 'TST(hour)'],
                    'SOL':test_user.loc[:, 'SOL(min)'],'WASO':test_user.loc[:, 'WASO(min)'],
-                   'TIB':test_user.loc[:, 'duraion_in_bed'],'Awake':test_user.loc[:, 'awake_count']              
+                   'TIB':test_user.loc[:, 'duraion_in_bed'],'Awake':test_user.loc[:, 'awake_count'],
+                   'SE':test_user.loc[:, 'SE']
                    })
 
     the_model = FeatureSelection().stepwise(df=df, response='mobility', direction='both',max_iter=5,criterion='ssr')  # criterion='ssr'是为了移除不合适特征
-    # ['bic', 'aic', 'ssr', 'rsquared', 'rsquared_adj'] 
+    # [' bic', 'aic', 'ssr', 'rsquared', 'rsquared_adj'] 
     # ['backward', 'forward', 'both']
     
     # print the value I would like to know: 
@@ -1121,7 +1401,7 @@ for test_user in temp_store:
     
 
 # split each ceof from parameter_list
-new_index = ['TST', 'SOL','WASO', 'Awake', 'TIB']
+new_index = ['TST', 'SOL','WASO', 'Awake', 'TIB','SE']
 sol_coefs=[];waso_coefs=[];tst_coefs=[];tib_coefs=[];awake_coefs=[];se_coefs=[]
 for each_user_coef in parameters_list:
     each_user_coef = each_user_coef.reindex(new_index,fill_value=np.nan)
@@ -1130,17 +1410,31 @@ for each_user_coef in parameters_list:
     awake_coefs.append(each_user_coef.loc['Awake'])
     tib_coefs.append(each_user_coef.loc['TIB'])
     waso_coefs.append(each_user_coef.loc['WASO'])
-    
+    se_coefs.append(each_user_coef.loc['SE'])
 # create a df to store results
 OLS_result_stepwise = pd.DataFrame({'age':age_list,'gender':gender_list,'data_points(days)':valid_len,
                            'R_squared_adj':models_adj_r_squared,'coef_TST':tst_coefs,
                            'coef_SOL':sol_coefs,'coef_WASO':waso_coefs,'coef_TIB':tib_coefs,
-                           'coef_Awake':awake_coefs,'p_value':p_val_list})    
+                           'coef_Awake':awake_coefs,'coef_SE':se_coefs,'p_value':p_val_list})    
+'''
+test_user=temp_store[13]
+df = pd.DataFrame({'mobility':test_user.loc[:, 'num_of_transition'],'TST':test_user.loc[:, 'TST(hour)'],
+                   'SOL':test_user.loc[:, 'SOL(min)'],'WASO':test_user.loc[:, 'WASO(min)'],
+                   'TIB':test_user.loc[:, 'duraion_in_bed'],'Awake':test_user.loc[:, 'awake_count'],
+                   'SE':test_user.loc[:, 'SE']
+                   })
 
-    
+#plt.scatter(df['WASO'],df['mobility'])    
 
-# OLS_result_stepwise.to_excel(r'F:/OLS_reuslts_36_individuals_backward_selection_highest_R_squared.xlsx',index=False)
+the_model = FeatureSelection().stepwise(df=df, response='mobility', direction='both',max_iter=5,criterion='ssr')  
+# criterion='ssr'is to remove coef with p-val>0.05
+fig = sm.graphics.plot_ccpr(the_model.stepwise_model, "TIB")
+fig.tight_layout(pad=1.0)    
+'''
+ 
 
+#OLS_result_stepwise.to_excel(r'F:/OLS_reuslts_36_individuals_backward_selection_highest_R_squared.xlsx',index=False)
+'''
 OLS_result_stepwise.loc[OLS_result_stepwise['gender'] ==1, 'gender'] = 'male'
 OLS_result_stepwise.loc[OLS_result_stepwise['gender'] ==2, 'gender'] = 'female'
 OLS_result_stepwise.loc[(OLS_result_stepwise['age'] >=70) & (OLS_result_stepwise['age'] <80), 'age'] = 70
@@ -1151,8 +1445,8 @@ OLS_result_stepwise.loc[OLS_result_stepwise['age'] ==80, 'age'] = '80s'
 OLS_result_stepwise.loc[OLS_result_stepwise['age'] ==90, 'age'] = '90s'
 
 
-a = OLS_result_stepwise.loc[OLS_result_stepwise['gender'] =='male', 'R_squared']
-b = OLS_result_stepwise.loc[OLS_result_stepwise['gender'] =='female', 'R_squared']
+a = OLS_result_stepwise.loc[OLS_result_stepwise['gender'] =='male', 'R_squared_adj']
+b = OLS_result_stepwise.loc[OLS_result_stepwise['gender'] =='female', 'R_squared_adj']
 u,pval = stats.mannwhitneyu(a,b)
 print(pval)
 
@@ -1167,10 +1461,10 @@ c = (OLS_result_stepwise.loc[OLS_result_stepwise['age'] =='90s', 'coef_SE']).tol
 t = three_group_dunn_ttest(a,b,c)
 post_hoc_dunn_result0= pd.DataFrame({'70VS80':t.iloc[0,1],'70VS90':t.iloc[0,2],
                                     '80VS90':t.iloc[1,2]},index=['mobility'])
-
+'''
 
 #############################################################################
-# one way ANOVA
+# non param tests
 #############################################################################
 
 # non-parameteric testing has to be apply on health people
@@ -1193,12 +1487,10 @@ selected_df_90s = user_gender[(user_gender['age']>=90) & (user_gender['age']<100
 
 #selected_df_demented = user_gender[(user_gender['ATSM']<7)]
 #selected_df_high_levelCare = user_gender[(user_gender['home_care_package_level']>3)]
-
-
     
-selected_df_female_70s['home_care_package_level'].describe()
-selected_df_female['home_care_package_level'].describe()
-selected_df_male['ATSM'].describe()
+#selected_df_female_70s['home_care_package_level'].describe()
+#selected_df_female['home_care_package_level'].describe()
+#selected_df_male['ATSM'].describe()
 
 # ---------------------------------------------------
 # split group
@@ -1206,7 +1498,7 @@ selected_df_male['ATSM'].describe()
 def merge_data_mobility(selected_df,reformed_sensor_list):
    mobility_data=[]
    for i in selected_df.index.tolist():
-       mobility_data.append(reformed_sensor_list[i]['value'].values.tolist())
+       mobility_data.append(reformed_sensor_list[i]['num_of_transition'].values.tolist())
    return mobility_data
 
 def merge_data_sleep_para(selected_df,sleep_para):
@@ -1272,53 +1564,49 @@ def mann_whitney_test_print_results(gender_list1,gender_list2):
     return stats,p_val
 
 pstat,pval = mann_whitney_test_print_results(male,female)
-mann_whitney_test_results = pd.DataFrame({'index':list_index,'stats':pstat,'p_val':pval})
+mann_whitney_test_results = pd.DataFrame({'index':list_index,'U_stats':pstat,'p_val':pval})
+print(mann_whitney_test_results)
 
 
-#--------------------------------
-length=[]
-mobility_data_37_people = merge_data_mobility(user_gender,reformed_sensor_list)
-sleep_data_37_people = merge_data_sleep_para(user_gender,reformed_sleep_list_no_nap)
-for each_user in sleep_data_37_people:
-    length.append(len(each_user))
-plt.hist(length,bins=6,color='#66ccff',edgecolor='black', linewidth=1.2)
-plt.xlabel('Length of valid days');plt.ylabel('Number of apperance')
-
-
+#--------------------------------visualization
+'''
 # male and female distributions, gender is fixed
 kwargs = dict(alpha=0.5, bins=50)
 c1='#00aaff';c2='y'
-male_label = '90s male'
-female_label = '90s female'
+male_label = 'male'
+female_label = 'female'
 
-plt.figure(figsize=(8,10))
-plt.subplot(3,2,1)
+plt.figure(figsize=(8,15))
+plt.subplot(4,2,1)
 plt.hist([item for sublist in mobility_data_male for item in sublist],**kwargs, color=c1, label=male_label+' mobility')
 plt.hist([item for sublist in mobility_data_female for item in sublist],**kwargs, color=c2, label=female_label+' mobility')
-plt.xlabel('number of steps');plt.legend()
-plt.subplot(3,2,2)
+plt.xlabel('steps');plt.legend()
+plt.subplot(4,2,2)
 plt.hist([item for sublist in sleep_tst_male for item in sublist],**kwargs, color=c1, label=male_label+' TST')
 plt.hist([item for sublist in sleep_tst_female for item in sublist],**kwargs, color=c2, label=female_label+' TST')
 plt.xlabel('TST(hour)');plt.legend()
-plt.subplot(3,2,3)
+plt.subplot(4,2,3)
 plt.hist([item for sublist in sleep_sol_male for item in sublist],**kwargs, color=c1, label=male_label+' SOL')
 plt.hist([item for sublist in sleep_sol_female for item in sublist],**kwargs, color=c2, label=female_label+' SOL')
 plt.xlabel('SOL(min)');plt.legend()
-plt.subplot(3,2,4)
+plt.subplot(4,2,4)
 plt.hist([item for sublist in sleep_waso_male for item in sublist],**kwargs, color=c1, label=male_label+' WASO')
 plt.hist([item for sublist in sleep_waso_female for item in sublist],**kwargs, color=c2, label=female_label+' WASO')
 plt.xlabel('WASO(min)');plt.legend()
-plt.subplot(3,2,5)
+plt.subplot(4,2,5)
+plt.hist([item for sublist in sleep_duration_in_bed_male for item in sublist],**kwargs, color=c1, label=male_label+' TIB')
+plt.hist([item for sublist in sleep_duration_in_bed_female for item in sublist],**kwargs, color=c2, label=female_label+' TIB')
+plt.xlabel('TIB(hour)');plt.legend()
+plt.subplot(4,2,6)
+plt.hist([item for sublist in sleep_awake_male for item in sublist],**kwargs, color=c1, label=male_label+' Awake')
+plt.hist([item for sublist in sleep_awake_female for item in sublist],**kwargs, color=c2, label=female_label+' Awake')
+plt.xlabel('awakenings');plt.legend()
+plt.subplot(4,2,7)
 plt.hist([item for sublist in sleep_effi_male for item in sublist],**kwargs, color=c1, label=male_label+' SE')
 plt.hist([item for sublist in sleep_effi_female for item in sublist],**kwargs, color=c2, label=female_label+' SE')
 plt.xlabel('SE');plt.legend()
-plt.subplot(3,2,6)
-plt.hist([item for sublist in sleep_duration_in_bed_male for item in sublist],**kwargs, color=c1, label=male_label+' Awake')
-plt.hist([item for sublist in sleep_duration_in_bed_female for item in sublist],**kwargs, color=c2, label=female_label+' Awake')
-plt.xlabel('awakenings');plt.legend()
 
-
-
+'''
 
 
 #--------------------------------------------
@@ -1336,6 +1624,8 @@ sleep_avgHR_70s = merge_data_sleep_para(fixed_gender,temp_sleep_avg_hr)
 sleep_avgRR_70s = merge_data_sleep_para(fixed_gender,temp_sleep_avg_rr)
 sleep_awake_70s = merge_data_sleep_para(fixed_gender,temp_sleep_awakeCount)
 sleep_exit_count_70s = merge_data_sleep_para(fixed_gender,temp_sleep_exitCount)
+age_70s=[mobility_data_70s,sleep_tst_70s,sleep_sol_70s,sleep_effi_70s,sleep_waso_70s,
+      sleep_duration_in_bed_70s,sleep_awake_70s  ]
 
 
 # at 80s
@@ -1351,6 +1641,8 @@ sleep_avgHR_80s = merge_data_sleep_para(fixed_gender,temp_sleep_avg_hr)
 sleep_avgRR_80s = merge_data_sleep_para(fixed_gender,temp_sleep_avg_rr)
 sleep_awake_80s = merge_data_sleep_para(fixed_gender,temp_sleep_awakeCount)
 sleep_exit_count_80s = merge_data_sleep_para(fixed_gender,temp_sleep_exitCount)
+age_80s=[mobility_data_80s,sleep_tst_80s,sleep_sol_80s,sleep_effi_80s,sleep_waso_80s,
+      sleep_duration_in_bed_80s,sleep_awake_80s  ]
 
 # at 90s
 fixed_gender = selected_df_90s
@@ -1365,22 +1657,35 @@ sleep_avgHR_90s = merge_data_sleep_para(fixed_gender,temp_sleep_avg_hr)
 sleep_avgRR_90s = merge_data_sleep_para(fixed_gender,temp_sleep_avg_rr)
 sleep_awake_90s = merge_data_sleep_para(fixed_gender,temp_sleep_awakeCount)
 sleep_exit_count_90s = merge_data_sleep_para(fixed_gender,temp_sleep_exitCount)
+age_90s=[mobility_data_90s,sleep_tst_90s,sleep_sol_90s,sleep_effi_90s,sleep_waso_90s,
+      sleep_duration_in_bed_90s,sleep_awake_90s  ]
 
-# Just for caution
-u,pval = two_group_Mann_Whitney_test(mobility_data_70s, mobility_data_80s)
-print("{:.2f}".format(u),',',pval)
-u,pval = two_group_Mann_Whitney_test(mobility_data_80s, mobility_data_90s)
-print("{:.2f}".format(u),',',pval)
-u,pval = two_group_Mann_Whitney_test(mobility_data_70s, mobility_data_90s)
-print("{:.2f}".format(u),',',pval)
+#--------------
+# test 3 groups are different
+def three_group_kruskal_ttest(group_a, group_b,group_c):
+    a = [item for sublist in group_a for item in sublist]
+    b = [item for sublist in group_b for item in sublist]
+    c = [item for sublist in group_c for item in sublist]
+    ttest,pval = stats.kruskal(a,b,c)
+    return ttest,pval
 
-u,pval = two_group_Mann_Whitney_test(sleep_tst_70s, sleep_tst_80s)
-print("{:.2f}".format(u),',',pval)
-u,pval = two_group_Mann_Whitney_test(sleep_tst_80s, sleep_tst_90s)
-print("{:.2f}".format(u),',',pval)
-u,pval = two_group_Mann_Whitney_test(sleep_tst_70s, sleep_tst_90s)
-print("{:.2f}".format(u),',',pval)
+def kruskal_test_print_results(age_list1,age_list2,age_list3):
+    '''gender_list: list_of_parameter_from_a_selected_group'''
+    stats=[];p_val=[]
+    for i in range(len(age_list1)):
+        each_para_age1 = age_list1[i]
+        each_para_age2 = age_list2[i]
+        each_para_age3 = age_list3[i]
+        u,pval = three_group_kruskal_ttest(each_para_age1, each_para_age2, each_para_age3)
+        stats.append("{:.2f}".format(u))
+        p_val.append("{:.4f}".format(pval))
+    return stats,p_val
 
+pstat,pval = kruskal_test_print_results(age_70s,age_80s,age_90s)
+list_index=['mobility','TST','SOL','SE','WASO','TIB','Awake']
+kruskal_test_results = pd.DataFrame({'index':list_index,'H_stats':pstat,'p_val':pval})
+print(kruskal_test_results)
+#--------------- post hoc
 def three_group_dunn_ttest(group_a, group_b,group_c):
     a = [item for sublist in group_a for item in sublist]
     b = [item for sublist in group_b for item in sublist]
@@ -1414,74 +1719,57 @@ t = three_group_dunn_ttest(sleep_awake_70s, sleep_awake_80s,sleep_awake_90s)
 post_hoc_dunn_result6= pd.DataFrame({'70VS80':t.iloc[0,1],'70VS90':t.iloc[0,2],
                                     '80VS90':t.iloc[1,2]},index=['Awake'])
 
-post_hoc_dunn_result = pd.concat([post_hoc_dunn_result1,post_hoc_dunn_result2,post_hoc_dunn_result3,
+post_hoc_dunn_result = pd.concat([post_hoc_dunn_result0,post_hoc_dunn_result1,post_hoc_dunn_result2,post_hoc_dunn_result3,
            post_hoc_dunn_result4,post_hoc_dunn_result5,post_hoc_dunn_result6], sort=False)    
 print(post_hoc_dunn_result)
 
-#--------------
-# test 3 groups are different
-def three_group_kruskal_ttest(group_a, group_b,group_c):
-    a = [item for sublist in group_a for item in sublist]
-    b = [item for sublist in group_b for item in sublist]
-    c = [item for sublist in group_c for item in sublist]
-    ttest,pval = stats.kruskal(a,b,c)
-    return ttest,pval
-t0,p0 = three_group_kruskal_ttest(mobility_data_70s, mobility_data_80s,mobility_data_90s)
-print("{:.2f}".format(t0),',',p0)
-t0,p0 = three_group_kruskal_ttest(sleep_tst_70s,sleep_tst_80s,sleep_tst_90s)
-print("{:.2f}".format(t0),',',p0)
-t0,p0 = three_group_kruskal_ttest(sleep_sol_70s, sleep_sol_80s,sleep_sol_90s)
-print("{:.2f}".format(t0),',',p0)
-t0,p0 = three_group_kruskal_ttest(sleep_effi_70s, sleep_effi_80s,sleep_effi_90s)
-print("{:.2f}".format(t0),',',p0)
-t0,p0 = three_group_kruskal_ttest(sleep_waso_70s,sleep_waso_80s,sleep_waso_90s)
-print("{:.2f}".format(t0),',',p0)
-t0,p0 = three_group_kruskal_ttest(sleep_duration_in_bed_70s,sleep_duration_in_bed_80s,sleep_duration_in_bed_90s)
-print("{:.2f}".format(t0),',',p0)
-t0,p0 = three_group_kruskal_ttest(sleep_awake_70s, sleep_awake_80s,sleep_awake_90s)
-print("{:.2f}".format(t0),',',p0)
 
-#--------------
-mobility_data_70s_male = merge_data_mobility(selected_df_male_70s,reformed_sensor_list)
-mobility_data_70s_female = merge_data_mobility(selected_df_female_70s,reformed_sensor_list)
-mobility_data_80s_male = merge_data_mobility(selected_df_male_80s,reformed_sensor_list)
-mobility_data_80s_female = merge_data_mobility(selected_df_female_80s,reformed_sensor_list)
-mobility_data_90s_male = merge_data_mobility(selected_df_male_90s,reformed_sensor_list)
-mobility_data_90s_female = merge_data_mobility(selected_df_female_90s,reformed_sensor_list)
 
+# Mann-Whitney t tests
+
+u,p = two_group_Mann_Whitney_test(mobility_data_70s, mobility_data_80s)
+
+
+#--------------Visualization
+'''
 kwargs = dict(alpha=0.5, bins=100)
-plt.figure(figsize=(15,4))
-plt.subplot(1,3,1)
-plt.hist([item for sublist in mobility_data_70s_male for item in sublist],**kwargs, color='b', label='male 70s mobility')
-plt.hist([item for sublist in mobility_data_70s_female for item in sublist],**kwargs, color='r', label='female 70s mobility')
-plt.hist([item for sublist in mobility_data_70s for item in sublist],**kwargs, color='g', label='mixed gender 70s mobility')
+plt.figure(figsize=(8,15))
+plt.subplot(4,2,1)
+plt.hist([item for sublist in mobility_data_70s for item in sublist],**kwargs, color='b', label='70s mobility')
+plt.hist([item for sublist in mobility_data_80s for item in sublist],**kwargs, color='r', label='80s mobility')
+plt.hist([item for sublist in mobility_data_90s for item in sublist],**kwargs, color='g', label='90s mobility')
 plt.legend()
-plt.subplot(1,3,2)
-plt.hist([item for sublist in mobility_data_80s_male for item in sublist],**kwargs, color='b', label='male 80s mobility')
-plt.hist([item for sublist in mobility_data_80s_female for item in sublist],**kwargs, color='r', label='female 80s mobility')
-plt.hist([item for sublist in mobility_data_80s for item in sublist],**kwargs, color='g', label='mixed gender 80s mobility')
+plt.subplot(4,2,2)
+plt.hist([item for sublist in sleep_tst_70s for item in sublist],**kwargs, color='b', label='70s TST')
+plt.hist([item for sublist in sleep_tst_80s for item in sublist],**kwargs, color='r', label='80s TST')
+plt.hist([item for sublist in sleep_tst_90s for item in sublist],**kwargs, color='g', label='90s TST')
 plt.legend()
-plt.subplot(1,3,3)
-plt.hist([item for sublist in mobility_data_90s_male for item in sublist],**kwargs, color='b', label='male 90s mobility')
-plt.hist([item for sublist in mobility_data_90s_female for item in sublist],**kwargs, color='r', label='female 90s mobility')
-plt.hist([item for sublist in mobility_data_90s for item in sublist],**kwargs, color='g', label='mixed gender 90s mobility')
+plt.subplot(4,2,3)
+plt.hist([item for sublist in sleep_sol_70s for item in sublist],**kwargs, color='b', label='70s SOL')
+plt.hist([item for sublist in sleep_sol_80s for item in sublist],**kwargs, color='r', label='80s SOL')
+plt.hist([item for sublist in sleep_sol_90s for item in sublist],**kwargs, color='g', label='90s SOL')
 plt.legend()
-
-kwargs = dict(alpha=0.5, bins=100)
-plt.figure(figsize=(6,12))
-plt.subplot(3,1,1)
-plt.hist([item for sublist in sleep_tst_70s for item in sublist],**kwargs, color='b', label='female 70s TST')
-plt.hist([item for sublist in sleep_tst_90s for item in sublist],**kwargs, color='g', label='female 90s TST')
+plt.subplot(4,2,4)
+plt.hist([item for sublist in sleep_waso_70s for item in sublist],**kwargs, color='b', label='70s WASO')
+plt.hist([item for sublist in sleep_waso_80s for item in sublist],**kwargs, color='r', label='80s WASO')
+plt.hist([item for sublist in sleep_waso_90s for item in sublist],**kwargs, color='g', label='90s WASO')
 plt.legend()
-plt.subplot(3,1,2)
-plt.hist([item for sublist in sleep_duration_in_bed_70s for item in sublist],**kwargs, color='b', label='female 70s duration_in_bed')
-plt.hist([item for sublist in sleep_duration_in_bed_90s for item in sublist],**kwargs, color='g', label='female 90s duration_in_bed')
+plt.subplot(4,2,5)
+plt.hist([item for sublist in sleep_duration_in_bed_70s for item in sublist],**kwargs, color='b', label='70s TIB')
+plt.hist([item for sublist in sleep_duration_in_bed_80s for item in sublist],**kwargs, color='r', label='80s TIB')
+plt.hist([item for sublist in sleep_duration_in_bed_90s for item in sublist],**kwargs, color='g', label='90s TIB')
 plt.legend()
-plt.subplot(3,1,3)
-plt.hist([item for sublist in sleep_effi_70s for item in sublist],**kwargs, color='b', label='female 70s SE')
-plt.hist([item for sublist in sleep_effi_90s for item in sublist],**kwargs, color='g', label='female 90s SE')
+plt.subplot(4,2,6)
+plt.hist([item for sublist in sleep_awake_70s for item in sublist],**kwargs, color='b', label='70s Awake')
+plt.hist([item for sublist in sleep_awake_80s for item in sublist],**kwargs, color='r', label='80s Awake')
+plt.hist([item for sublist in sleep_awake_90s for item in sublist],**kwargs, color='g', label='90s Awake')
 plt.legend()
-
+plt.subplot(4,2,7)
+plt.hist([item for sublist in sleep_effi_70s for item in sublist],**kwargs, color='b', label='70s SE')
+plt.hist([item for sublist in sleep_effi_80s for item in sublist],**kwargs, color='r', label='80s SE')
+plt.hist([item for sublist in sleep_effi_90s for item in sublist],**kwargs, color='g', label='90s SE')
+plt.legend()
+'''
 
 #############################################################################
 # get basic stats and tests
@@ -1492,66 +1780,88 @@ def get_mean_and_std(group_a):
     std = np.nanstd(a)
     return avg,std
 
-avg0,std0 = get_mean_and_std(mobility_data_90s)
+avg0,std0 = get_mean_and_std(mobility_data_70s)
 print("{:.2f}".format(avg0),'±',"{:.2f}".format(std0))
-avg1,std1 = get_mean_and_std(sleep_tst_70s)
+avg1,std1 = get_mean_and_std(mobility_data_80s)
 print("{:.2f}".format(avg1),'±',"{:.2f}".format(std1))
-avg2,std2 = get_mean_and_std(sleep_sol_70s)
+avg2,std2 = get_mean_and_std(mobility_data_90s)
 print("{:.2f}".format(avg2),'±',"{:.2f}".format(std2))
-avg3,std3 = get_mean_and_std(sleep_waso_70s)
+avg3,std3 = get_mean_and_std(mobility_data_male)
 print("{:.2f}".format(avg3),'±',"{:.2f}".format(std3))
-avg4,std4 = get_mean_and_std(sleep_effi_70s)
+avg4,std4 = get_mean_and_std(mobility_data_female)
 print("{:.2f}".format(avg4),'±',"{:.3f}".format(std4))
-#avg5,std5 = get_mean_and_std(sleep_exit_70s)
-#print("{:.2f}".format(avg5),'±',"{:.3f}".format(std5))
 
-
+avg0,std0 = get_mean_and_std(sleep_tst_70s)
+print("{:.2f}".format(avg0),'±',"{:.2f}".format(std0))
 avg1,std1 = get_mean_and_std(sleep_tst_80s)
 print("{:.2f}".format(avg1),'±',"{:.2f}".format(std1))
-avg2,std2 = get_mean_and_std(sleep_sol_80s)
+avg2,std2 = get_mean_and_std(sleep_tst_90s)
 print("{:.2f}".format(avg2),'±',"{:.2f}".format(std2))
-avg3,std3 = get_mean_and_std(sleep_waso_80s)
+avg3,std3 = get_mean_and_std(sleep_tst_male)
 print("{:.2f}".format(avg3),'±',"{:.2f}".format(std3))
-avg4,std4 = get_mean_and_std(sleep_effi_80s)
+avg4,std4 = get_mean_and_std(sleep_tst_female)
 print("{:.2f}".format(avg4),'±',"{:.3f}".format(std4))
-#avg5,std5 = get_mean_and_std(sleep_exit_80s)
-#print("{:.2f}".format(avg5),'±',"{:.3f}".format(std5))
 
-
-avg1,std1 = get_mean_and_std(sleep_tst_90s)
+avg0,std0 = get_mean_and_std(sleep_sol_70s)
+print("{:.2f}".format(avg0),'±',"{:.2f}".format(std0))
+avg1,std1 = get_mean_and_std(sleep_sol_80s)
 print("{:.2f}".format(avg1),'±',"{:.2f}".format(std1))
 avg2,std2 = get_mean_and_std(sleep_sol_90s)
 print("{:.2f}".format(avg2),'±',"{:.2f}".format(std2))
-avg3,std3 = get_mean_and_std(sleep_waso_90s)
+avg3,std3 = get_mean_and_std(sleep_sol_male)
 print("{:.2f}".format(avg3),'±',"{:.2f}".format(std3))
-avg4,std4 = get_mean_and_std(sleep_effi_90s)
+avg4,std4 = get_mean_and_std(sleep_sol_female)
 print("{:.2f}".format(avg4),'±',"{:.3f}".format(std4))
-#avg5,std5 = get_mean_and_std(sleep_exit_90s)
-#print("{:.2f}".format(avg5),'±',"{:.3f}".format(std5))
 
-#-----------
-avg1,std1 = get_mean_and_std(sleep_tst_female)
+avg0,std0 = get_mean_and_std(sleep_waso_70s)
+print("{:.2f}".format(avg0),'±',"{:.2f}".format(std0))
+avg1,std1 = get_mean_and_std(sleep_waso_80s)
 print("{:.2f}".format(avg1),'±',"{:.2f}".format(std1))
-avg2,std2 = get_mean_and_std(sleep_sol_female)
-print("{:.2f}".format(avg2),'±',"{:.2f}".format(std2))
-avg3,std3 = get_mean_and_std(sleep_waso_female)
-print("{:.2f}".format(avg3),'±',"{:.2f}".format(std3))
-avg4,std4 = get_mean_and_std(sleep_effi_female)
-print("{:.2f}".format(avg4),'±',"{:.3f}".format(std4))
-#avg5,std5 = get_mean_and_std(sleep_exit_female)
-#print("{:.2f}".format(avg5),'±',"{:.3f}".format(std5))
-
-avg1,std1 = get_mean_and_std(sleep_tst_male)
-print("{:.2f}".format(avg1),'±',"{:.2f}".format(std1))
-avg2,std2 = get_mean_and_std(sleep_sol_male)
+avg2,std2 = get_mean_and_std(sleep_waso_90s)
 print("{:.2f}".format(avg2),'±',"{:.2f}".format(std2))
 avg3,std3 = get_mean_and_std(sleep_waso_male)
 print("{:.2f}".format(avg3),'±',"{:.2f}".format(std3))
-avg4,std4 = get_mean_and_std(sleep_effi_male)
+avg4,std4 = get_mean_and_std(sleep_waso_female)
 print("{:.2f}".format(avg4),'±',"{:.3f}".format(std4))
-#avg5,std5 = get_mean_and_std(sleep_exit_male)
-#print("{:.2f}".format(avg5),'±',"{:.3f}".format(std5))
 
+avg0,std0 = get_mean_and_std(sleep_duration_in_bed_70s)
+print("{:.2f}".format(avg0),'±',"{:.2f}".format(std0))
+avg1,std1 = get_mean_and_std(sleep_duration_in_bed_80s)
+print("{:.2f}".format(avg1),'±',"{:.2f}".format(std1))
+avg2,std2 = get_mean_and_std(sleep_duration_in_bed_90s)
+print("{:.2f}".format(avg2),'±',"{:.2f}".format(std2))
+avg3,std3 = get_mean_and_std(sleep_duration_in_bed_male)
+print("{:.2f}".format(avg3),'±',"{:.2f}".format(std3))
+avg4,std4 = get_mean_and_std(sleep_duration_in_bed_female)
+print("{:.2f}".format(avg4),'±',"{:.3f}".format(std4))
+
+avg0,std0 = get_mean_and_std(sleep_awake_70s)
+print("{:.2f}".format(avg0),'±',"{:.2f}".format(std0))
+avg1,std1 = get_mean_and_std(sleep_awake_80s)
+print("{:.2f}".format(avg1),'±',"{:.2f}".format(std1))
+avg2,std2 = get_mean_and_std(sleep_awake_90s)
+print("{:.2f}".format(avg2),'±',"{:.2f}".format(std2))
+avg3,std3 = get_mean_and_std(sleep_awake_male)
+print("{:.2f}".format(avg3),'±',"{:.2f}".format(std3))
+avg4,std4 = get_mean_and_std(sleep_awake_female)
+print("{:.2f}".format(avg4),'±',"{:.3f}".format(std4))
+
+avg0,std0 = get_mean_and_std(sleep_effi_70s)
+print("{:.2f}".format(avg0),'±',"{:.2f}".format(std0))
+avg1,std1 = get_mean_and_std(sleep_effi_80s)
+print("{:.2f}".format(avg1),'±',"{:.2f}".format(std1))
+avg2,std2 = get_mean_and_std(sleep_effi_90s)
+print("{:.2f}".format(avg2),'±',"{:.2f}".format(std2))
+avg3,std3 = get_mean_and_std(sleep_effi_male)
+print("{:.2f}".format(avg3),'±',"{:.2f}".format(std3))
+avg4,std4 = get_mean_and_std(sleep_effi_female)
+print("{:.2f}".format(avg4),'±',"{:.3f}".format(std4))
+
+#male=[mobility_data_male,sleep_tst_male,sleep_sol_male,sleep_effi_male,sleep_waso_male,
+#      sleep_duration_in_bed_male,sleep_awake_male
+#      ]
+#age_70s=[mobility_data_70s,sleep_tst_70s,sleep_sol_70s,sleep_effi_70s,sleep_waso_70s,
+#      sleep_duration_in_bed_70s,sleep_awake_70s  ]
 
 
 # Levene test for equal variances
@@ -1582,128 +1892,3 @@ t3,p3 = three_group_kruskal_ttest(sleep_waso_70s,sleep_waso_80s,sleep_waso_90s)
 print("{:.2f}".format(t3),',',p3)
 t4,p4 = three_group_kruskal_ttest(sleep_effi_70s, sleep_effi_80s,sleep_effi_90s)
 print("{:.2f}".format(t4),',',p4)
-
-
-#############################################################################
-# get hist plots and one way ANOVA
-#############################################################################
-kwargs = dict(alpha=0.5, bins=100)
-label_70s='70s both gender'
-label_80s = '80s both gender'
-label_90s = '90s both gender'
-
-plt.figure(figsize=(20,4))
-plt.subplot(1,5,1)
-plt.hist([item for sublist in mobility_data_70s for item in sublist],**kwargs, color='r', label=label_70s)
-plt.hist([item for sublist in mobility_data_80s for item in sublist],**kwargs, color='b', label=label_80s)
-plt.hist([item for sublist in mobility_data_90s for item in sublist],**kwargs, color='g', label=label_90s)
-plt.legend();plt.title('mobility')
-plt.subplot(1,5,2)
-plt.hist([item for sublist in sleep_tst_70s for item in sublist],**kwargs, color='r', label=label_70s)
-plt.hist([item for sublist in sleep_tst_80s for item in sublist],**kwargs, color='b', label=label_80s)
-plt.hist([item for sublist in sleep_tst_90s for item in sublist],**kwargs, color='g', label=label_90s)
-plt.legend();plt.title('TST')
-plt.subplot(1,5,3)
-plt.hist([item for sublist in sleep_sol_70s for item in sublist],**kwargs, color='r', label=label_70s)
-plt.hist([item for sublist in sleep_sol_80s for item in sublist],**kwargs, color='b', label=label_80s)
-plt.hist([item for sublist in sleep_sol_90s for item in sublist],**kwargs, color='g', label=label_90s)
-plt.legend();plt.title('SOL')
-plt.subplot(1,5,4)
-plt.hist([item for sublist in sleep_waso_70s for item in sublist],**kwargs, color='r', label=label_70s)
-plt.hist([item for sublist in sleep_waso_80s for item in sublist],**kwargs, color='b', label=label_80s)
-plt.hist([item for sublist in sleep_waso_90s for item in sublist],**kwargs, color='g', label=label_90s)
-plt.legend();plt.title('WASO')
-plt.subplot(1,5,5)
-plt.hist([item for sublist in sleep_effi_70s for item in sublist],**kwargs, color='r', label=label_70s)
-plt.hist([item for sublist in sleep_effi_80s for item in sublist],**kwargs, color='b', label=label_80s)
-plt.hist([item for sublist in sleep_effi_90s for item in sublist],**kwargs, color='g', label=label_90s)
-plt.legend();plt.title('SE')
-
-
-from statsmodels.stats.multicomp import MultiComparison
-from statsmodels.formula.api import ols
-from statsmodels.stats.anova import anova_lm
-
-def get_df_for_three_group(group_a,group_b,group_c):
-    a = [item for sublist in group_a for item in sublist]
-    a_new = [value for value in a if not math.isnan(value)]
-    b = [item for sublist in group_b for item in sublist]
-    b_new = [value for value in b if not math.isnan(value)]
-    c = [item for sublist in group_c for item in sublist]
-    c_new = [value for value in c if not math.isnan(value)]
-    data_a = pd.DataFrame({'age_group':'70s','para_value':a_new})
-    data_b = pd.DataFrame({'age_group':'80s','para_value':b_new})
-    data_c = pd.DataFrame({'age_group':'90s','para_value':c_new})
-    data = data_a.append(data_b, ignore_index=True)
-    data = data.append(data_c, ignore_index=True)
-    return data
-
-mobility_data_all_age = get_df_for_three_group(mobility_data_70s,mobility_data_80s,mobility_data_90s)
-sleep_tst_data_all_age = get_df_for_three_group(sleep_tst_70s,sleep_tst_80s,sleep_tst_90s)
-sleep_sol_data_all_age = get_df_for_three_group(sleep_sol_70s,sleep_sol_80s,sleep_sol_90s)
-sleep_waso_data_all_age = get_df_for_three_group(sleep_waso_70s,sleep_waso_80s,sleep_waso_90s)
-sleep_effi_data_all_age = get_df_for_three_group(sleep_effi_70s,sleep_effi_80s,sleep_effi_90s)
-
-#=================================================
-data = sleep_effi_data_all_age
-linea_model = ols('para_value ~ age_group', data = data).fit()
-anovat = anova_lm(linea_model)
-print(anovat)
-
-data = sleep_effi_data_all_age
-MultiComp = MultiComparison(data['para_value'], data['age_group'])
-comp = MultiComp.allpairtest(stats.ttest_ind, method='Holm')
-print (comp[0])
-
-'''
-# another way to do one way ANOVA
-f, p = stats.f_oneway(data[data['age_group'] == '70s'].para_value,
-                      data[data['age_group'] == '80s'].para_value,
-                      data[data['age_group'] == '90s'].para_value)
- 
-print ('One-way ANOVA')
-print ('=============')
- 
-print ('F value:', f)
-print ('P value:', p, '\n')
-'''
-
-#############################################################################
-# Correlation analysis
-#############################################################################
-# male VS female
-mobility_male = merge_data_mobility(selected_df_90s,reformed_sensor_list)
-sleep_tst_male = merge_data_sleep_para(selected_df_90s,temp_sleep_duration)
-sleep_sol_male = merge_data_sleep_para(selected_df_90s,temp_sleep_onset_duration)
-sleep_se_male = merge_data_sleep_para(selected_df_90s,temp_sleep_efficiency)
-sleep_waso_male = merge_data_sleep_para(selected_df_90s,temp_waso)
-
-mobility_female = merge_data_mobility(selected_df_female,reformed_sensor_list)
-sleep_tst_female = merge_data_sleep_para(selected_df_female,temp_sleep_duration)
-sleep_sol_female = merge_data_sleep_para(selected_df_female,temp_sleep_onset_duration)
-sleep_se_female = merge_data_sleep_para(selected_df_female,temp_sleep_efficiency)
-sleep_waso_female = merge_data_sleep_para(selected_df_female,temp_waso)
-
-def flat_list_of_lists(mob):
-    new_list = [item for sublist in mob for item in sublist]
-    return new_list
-
-def get_merged_df(mob,tst,sol,waso,se):
-    # each input is a list of lists
-    df =pd.DataFrame({'mobility':flat_list_of_lists(mob),'TST':flat_list_of_lists(tst),
-                  'SOL':flat_list_of_lists(sol),'WASO':flat_list_of_lists(waso),
-                  'SE':flat_list_of_lists(se)})   
-    return df
-
-male_df = get_merged_df(mobility_male,sleep_tst_male,sleep_sol_male,
-                        sleep_waso_male,sleep_se_male)
-female_df = get_merged_df(mobility_female,sleep_tst_female,sleep_sol_female,
-                        sleep_waso_female,sleep_se_female)
-
-
-
-# https://heartbeat.fritz.ai/seaborn-heatmaps-13-ways-to-customize-correlation-matrix-visualizations-f1c49c816f07
-fig, ax = plt.subplots(figsize=(6,6))
-sns.heatmap(male_df.corr(method='pearson'), annot = True, cbar=False, ax=ax,fmt='.2g',
-            center= 0, cmap= 'coolwarm', linewidths=1, linecolor='black',square=True)
-plt.show()
