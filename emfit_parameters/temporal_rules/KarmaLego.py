@@ -5,7 +5,6 @@ Temporal Patterns Discovery from Multivariate Time Series via Temporal Abstracti
 
 Link: https://pdfs.semanticscholar.org/a800/83f16631756d0865e13f679c2d5084df03ae.pdf
 """
-import time
 from help_functions import *
 
 
@@ -99,7 +98,12 @@ class TIRP:
 
         :return: string that is printed
         """
-        return self.print() + '\n\nVertical support: ' + str(round(self.vertical_support, 3)) + '\n\n'
+        f = open("out.txt", "a",encoding="utf-8")
+        contents = '\n\nVertical_support: ' + str(round(self.vertical_support, 3)) + '\nIndices_supporting: ' + str(self.entity_indices_supporting)
+        print(self.print() + contents,file=f)
+        f.close()
+        return ''
+        # return self.print() + contents
 
     def __lt__(self, other):
         """
@@ -157,25 +161,27 @@ class TIRP:
         if len(self.relations) == 0:
             return
 
+        f = open("out.txt", "a",encoding="utf-8")
+
         longest_symbol_name_len = len(max(self.symbols, key=len))
         longest_symbol_name_len_1 = len(max(self.symbols[:-1], key=len))
 
-        print('\n\n', ' ' * longest_symbol_name_len_1, '‖', '   '.join(self.symbols[1:]))
-        print('=' * (sum(len(s) for s in self.symbols[1:]) + longest_symbol_name_len_1 + 3 * len(self.symbols)))
+        print('\n\n', ' ' * longest_symbol_name_len_1, '‖', '   '.join(self.symbols[1:]), file=f)
+        print('=' * (sum(len(s) for s in self.symbols[1:]) + longest_symbol_name_len_1 + 3 * len(self.symbols)),file=f)
 
         start_index = 0
         increment = 2
         for row_id in range(len(self.symbols) - 1):
-            print(self.symbols[row_id], ' ' * (longest_symbol_name_len_1 - len(self.symbols[row_id])), '‖ ', end='')
+            print(self.symbols[row_id], ' ' * (longest_symbol_name_len_1 - len(self.symbols[row_id])), '‖ ', end='', file=f)
 
             row_increment = row_id + 1
             index = start_index
             for column_id in range(len(self.symbols) - 1):
                 num_of_spaces = len(self.symbols[column_id + 1]) + 2
                 if column_id < row_id:    # print spaces
-                    print(' ' * (num_of_spaces + 1), end='')
+                    print(' ' * (num_of_spaces + 1), end='',file=f)
                 else:   # print relation
-                    print(self.relations[index], end=' ' * num_of_spaces)
+                    print(self.relations[index], end=' ' * num_of_spaces, file=f)
                     index += row_increment
                     row_increment += 1
 
@@ -183,8 +189,11 @@ class TIRP:
             increment += 1
 
             if row_id != len(self.symbols) - 2:
-                print()
-                print('-' * (sum(len(s) for s in self.symbols[1:]) + longest_symbol_name_len + 3 * len(self.symbols)))
+                print(file=f)
+                print('-' * (sum(len(s) for s in self.symbols[1:]) + longest_symbol_name_len + 3 * len(self.symbols)), file=f)
+
+    
+        f.close()
 
         return ""
 
@@ -461,61 +470,4 @@ class Lego(KarmaLego):
                         all_possible_TIRPs.append(tirp_copy)
 
         return all_possible_TIRPs
-
-
-if __name__ == "__main__":
-    # entity = entity_list[1]
-    # plot_entity(entity)
-
-    from entities import entity_list    # use artificial entities from entities.py
-
-
-    print('Number of entities:', len(entity_list))
-
-    epsilon = 0
-    max_distance = 4
-    min_ver_supp = 0.3
-
-    start = time.time()
-    tree = KarmaLego(epsilon, max_distance, min_ver_supp).run(entity_list)
-    tree.print()
-    end = time.time()
-    print('\n', round(end - start), 's')
-
-    # save_pickle('data/pickle/pneumonia_tree_group_3.pickle', tree)
-
-
-
-    # TIMES:
-    # min_ver_supp = 0.2
-    # each time different time because of random sampling
-    # 39 entities ---> 125 s (3x)
-    # 394 entities ---> 1057 s (2x)
-    # 787 entities ---> 2329 s (2x)
-    # 3936 entities ---> 12.6 h
-    # 39362 entities (all) ---> 19 days
-    # 25% of all data: 9840 entities ---> 39.7 h
-    # 10% of all admissions data: 3793 entities ---> 1.6 h
-
-    # min_ver_supp = 0.1
-    # 10% of all admissions data: 3793 entities (without electrolytes) ---> 3.2 h
-
-    # PNEUMONIA TIMES:
-    # min_ver_supp = 0.2: 1336 entities ---> 1447 s
-    # min_ver_supp = 0.15: 1336 entities ---> 3156 s
-    # min_ver_supp = 0.05: 1336 entities (without electrolytes) ---> 1.7 h
-
-    # NOTES:
-    # in all_admissions.csv (from table admissions) there are 37.957 patients, 37.933 if accounting enddate >= startdate
-    # in entity_list.json (from table prescriptions) there are 39.362 patients
-    # some patients from table prescriptions doesn't have any diagnoses in table admissions
-
-    # in clustering without electrolytes most of the samples are in one group (both in pneumonia and 10% of admissions)
-
-    # if clustering.py is run with parameters: use = '10%', algorithm = 'hierarchical'
-    # then check dendrogram and split it to 4 groups (558, 135, 2813, 287)
-    # trees for each of 4 clusters are saved in file 'data/pickle/cluster_trees_min_supp_0_3_and_0_1.pickle'
-
-    # groups made for Pneumonia patients according to length of stay -> for each group ran KarmaLego with
-    # 'max_distance = max. group length of stay' and minimal support [0.05, 0.05, 0.15, 0.5] respectively
 
