@@ -6,10 +6,11 @@ import datetime as dt
 #import mysql.connector
 from datetime import timedelta
 import seaborn as sns
+import math
+import copy
 #import merge_sensors as ms # make sure they are in same dir, run ms first
 from datetime import datetime
 
-from apyori import apriori
 ###################################################
 # Sleep summary data: just use csv file
 ###################################################
@@ -283,6 +284,11 @@ for each_user in finally_sensor_list:
 # After obtain mobility, remove the dates with mobility=0
 users_transition = [each_user[each_user['num_of_transition'] != 0] for each_user in users_transition]
 
+# or if want to get it easier
+# num_of_tranistion_45_ppl=pd.read_excel(r'F:\Sensor_Data_Processing\temporal_rules\num_of_tranistion_45_ppl.xlsx') 
+# users_transition = list(num_of_tranistion_45_ppl.groupby(['PID']))
+
+
 #############################################################################
 # Remove repetitive dates of sleep recording 
 #############################################################################
@@ -431,9 +437,9 @@ for each_user_sleep in reformed_sleep_list_no_nap:
         end_sleep_only_date = dt.datetime(b.year,b.month,b.day)
         
         # If start sleep time is between 7pm-11:59pm, and end sleep time is  
-        # next day, count this sleep as next day
+        # next day, count this sleep as this day
         if a <= time_division_today and a>=time_division_7pm and start_sleep_only_date!=end_sleep_only_date:
-            each_sleep_date = a.date() + timedelta(days=1)
+            each_sleep_date = a.date() 
             start_sleep_dates.append(each_sleep_date)
 
         # If start sleep time is between 7pm-11:59pm, and end sleep time is  
@@ -444,9 +450,9 @@ for each_user_sleep in reformed_sleep_list_no_nap:
             start_sleep_dates.append(each_sleep_date)
 
         # If start sleep time is between 0am-6am, and end sleep time is  
-        # same day, count this sleep as this day
+        # same day, count this sleep as previous day
         if a >= time_division_tmr and a<=time_division_6am and start_sleep_only_date==end_sleep_only_date:
-            each_sleep_date = a.date()
+            each_sleep_date = a.date() - timedelta(days=1)
             start_sleep_dates.append(each_sleep_date)
 
     each_user_sleep['date_for_this_sleep'] = start_sleep_dates
@@ -531,16 +537,14 @@ all_dacs_mobility_grouped_list_length = [len(x) for x in all_dacs_mobility_group
 # we only match my mobility with csiro, we don't need to match CSIRO mobility with ours
 are_length_same = debugging_two_temp_list_value(matched_date_user_transition_list_length,all_dacs_mobility_grouped_list_length)
 
-
-
     
 #-------------------------------
-# Same, for each unit in reformed_sleep_list_with_no_repetitive and users_transition,remove the 
-# dates that in reformed_sleep_list_with_no_nap but not in users_transition
+# Same, for each unit in reformed_sleep_list_with_no_repetitive and matched_date_user_transition,remove the 
+# dates that in reformed_sleep_list_with_no_nap but not in matched_date_user_transition
 reformed_sleep_list = [];reformed_sensor_list = []
-for i in range(len(users_transition)):
+for i in range(len(matched_date_user_transition)):
     # add the day as index of mobility
-    each_PID_mobility = users_transition[i]
+    each_PID_mobility = matched_date_user_transition[i]
     each_PID_mobility['start_day_trucated'] = [each_day.date() for each_day in each_PID_mobility['date'].tolist()] 
     # add the day as index of sleep, change the consecutive cells with reptitive day
     each_PID_sleep = reformed_sleep_list_no_repetead[i]
@@ -558,6 +562,19 @@ for i in range(len(users_transition)):
 reformed_sleep_list_length = [len(x) for x in reformed_sleep_list]
 reformed_sensor_list_length = [len(x) for x in reformed_sensor_list]
 are_length_same = debugging_two_temp_list_value(reformed_sleep_list_length,reformed_sensor_list_length)
+
+#############################################################################
+# Create a big dataframe contain each user's mobility and sleep
+#############################################################################
+final_df = []
+for i in range(len(reformed_sleep_list)):
+    example_user_mobility = reformed_sensor_list[i][['PID','start_day_trucated','num_of_transition']]
+    example_user_sleep = reformed_sleep_list[i][['date_for_this_sleep','TST(hour)','WASO(min)','SOL(min)','SE','duraion_in_bed']]
+    merged_df = example_user_mobility.merge(example_user_sleep,left_on='start_day_trucated',right_on='date_for_this_sleep',
+                how = 'inner')[['PID','start_day_trucated','num_of_transition','TST(hour)','WASO(min)','SOL(min)',
+                                'SE','duraion_in_bed']]
+    if len(merged_df)>10:                         
+        final_df.append(merged_df)
 
 #############################################################################
 # CODE age and gender into each user
@@ -594,285 +611,285 @@ user_mental_score = user_mental_score[user_mental_score['PID'].isin(user_gender[
 user_gender = user_gender.merge(user_mental_score,left_on='record_id',right_on='PID', 
      how = 'inner')[['record_id', 'living_area', 'home_care_package_level', 'gender',
                      'age','ATSM']]
-user_gender = user_gender[user_gender['home_care_package_level']<4]
+# user_gender = user_gender[user_gender['home_care_package_level']<4]
 user_gender['ATSM'] = [int(x) for x  in user_gender['ATSM'].tolist()]
 
 # removed users that has mental score < 5
-user_gender = user_gender[user_gender['ATSM']>=7]
+# user_gender = user_gender[user_gender['ATSM']>=7]
 
 #############################################################################
-# Sleep parameter selection
-#############################################################################
-# Ground truth mobility, ignore those who have data less than 29 days
-def get_temp_sleep_parameter(reformed_sleep_list,sleep_para):
-    temp_sleep_duration=[]
-    for each_user_mobility in reformed_sleep_list:
-        aa = each_user_mobility[sleep_para].tolist()
-        temp_sleep_duration.append(aa) 
-    return temp_sleep_duration
-
-temp_sleep_duration = get_temp_sleep_parameter(reformed_sleep_list,'TST(hour)')
-temp_sleep_onset_duration = get_temp_sleep_parameter(reformed_sleep_list,'SOL(min)')
-temp_sleep_efficiency = get_temp_sleep_parameter(reformed_sleep_list,'SE')
-temp_waso = get_temp_sleep_parameter(reformed_sleep_list,'WASO(min)')
-temp_sleep_duration_in_bed = get_temp_sleep_parameter(reformed_sleep_list,'duraion_in_bed')
-temp_sleep_bedexit = get_temp_sleep_parameter(reformed_sleep_list,'bed_exit_duration(min)')
-temp_sleep_ttc = get_temp_sleep_parameter(reformed_sleep_list,'toss_turn_count')
-temp_sleep_avg_hr = get_temp_sleep_parameter(reformed_sleep_list,'avg_hr')
-temp_sleep_avg_rr = get_temp_sleep_parameter(reformed_sleep_list,'avg_rr')
-temp_sleep_awakeCount = get_temp_sleep_parameter(reformed_sleep_list,'awake_count')
-temp_sleep_exitCount = get_temp_sleep_parameter(reformed_sleep_list,'bed_exit_count')
-
-   
-
-flat_sleep_duration = [item for sublist in temp_sleep_duration for item in sublist]
-print('flat_sleep_duration = ', len(flat_sleep_duration))
-    
-list(map(tuple, np.where( np.isnan( np.asarray(flat_sleep_duration) ) )))
-  
-avg_of_sleep_duration = np.mean(np.asarray(flat_sleep_duration))
-print('avg_of_sleep_duration =',avg_of_sleep_duration)
-
-
-
-
-
-#############################################################################
-# Smoother of data & change point detection
+# Smoother of data on reformed_sleep_list and reformed_sensor_list
 #############################################################################
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
 
-y1=np.asarray(users_transition[2]['num_of_transition'].tolist() )
-# to run LOWESS, ensure x axis is in correct format
-x = pd.to_datetime(users_transition[2]['date'], format='%d/%m/%Y  %H:%M')   
+def get_smoothed_time_series(example_user,frac,iteration):
+    pid = example_user['PID'].tolist()[0]
+    y_mob=np.asarray(example_user['num_of_transition'].tolist() )
+    y_tst=np.asarray(example_user['TST(hour)'].tolist() )
+    y_waso=np.asarray(example_user['WASO(min)'].tolist() )
+    y_sol=np.asarray(example_user['SOL(min)'].tolist() )
+    y_se=np.asarray(example_user['SE'].tolist() )
+    y_tib=np.asarray(example_user['duraion_in_bed'].tolist() )
+    # to run LOWESS, ensure x axis is in correct format
+    x = pd.to_datetime(example_user['start_day_trucated'], format='%Y/%m/%d')   
 
-smooth_curve = lowess(y1, x, frac=0.1, it=3)[:,1]
+    # get LOWESS smoothed curve for each parameter
+    smooth_mob = lowess(y_mob, x, frac=frac, it=iteration)[:,1]
+    smooth_tst = lowess(y_tst, x, frac=frac, it=iteration)[:,1]
+    smooth_waso = lowess(y_waso, x, frac=frac, it=iteration)[:,1]
+    smooth_sol = lowess(y_sol, x, frac=frac, it=iteration)[:,1]
+    smooth_se = lowess(y_se, x, frac=frac, it=iteration)[:,1]
+    smooth_tib = lowess(y_tib, x, frac=frac, it=iteration)[:,1]
+
+    smooth_df = pd.DataFrame({'PID':pid,'date':x,'mobility':smooth_mob,'TST':smooth_tst,
+                              'WASO':smooth_waso,'SOL':smooth_sol,'SE':smooth_se,'TIB':smooth_tib})
+    return smooth_df
+
+# get smoothed_curve
+smooth_final_df=[]
+for example_user in final_df:
+    smoothed_user = get_smoothed_time_series(example_user,0.05,3)
+    smooth_final_df.append(smoothed_user)
+
+# Add demographic information by first flatten the df, match the user_gender, and re-group
+flat_final_df=pd.DataFrame({})
+for each in smooth_final_df:
+    flat_final_df = pd.concat([flat_final_df,each])
+merged_df = flat_final_df.merge(user_gender,left_on='PID',right_on='record_id',
+                how = 'inner')[['PID','date','mobility','TST','WASO','SOL','SE',
+                                'TIB','home_care_package_level', 'gender','age',
+                                'ATSM']]
+smooth_final_df = [each[1] for each in merged_df.groupby(['PID'])]
+                              
+# check user demograpic property
+user_44_ppl_list = list(set(merged_df['PID'].tolist()))
+demogrp_info_44_ppl = user_gender[user_gender['record_id'].isin(user_44_ppl_list)]
+
+demogrp_info_44_ppl[demogrp_info_44_ppl['gender']==1]['age'].describe()
+
+
+    
+
+'''
+# to excel
+final_big_df=pd.DataFrame({})    
+for each in smooth_final_df:
+    final_big_df= pd.concat([final_big_df,each])
+final_big_df.to_excel(r'F:\Sensor_Data_Processing\temporal_rules\smoothed_final_df.xlsx')
+'''
+# final_big_df = pd.read_excel(r'F:\Sensor_Data_Processing\temporal_rules\smoothed_final_df.xlsx')
+# smooth_final_df = [each[1] for each in final_big_df.groupby(['PID'])]
+
+'''
+#-----------
+# example of LOWESS smooth curve
+y1=np.asarray(reformed_sensor_list[2]['num_of_transition'].tolist() )
+# to run LOWESS, ensure x axis is in correct format
+x = pd.to_datetime(reformed_sensor_list[2]['date'], format='%d/%m/%Y  %H:%M')   
+smooth_curve = lowess(y1, x, frac=0.15, it=3)[:,1]
 data = np.asarray(smooth_curve)
 
 plt.figure(figsize=(9,5))
 plt.plot(x, y1, 'r',label='mobility')
-plt.plot(x, smooth_curve, 'b',label='LOWESS curve, fraction=0.05, iteration = 3')
+plt.plot(x, smooth_curve, 'b',label='LOWESS curve, fraction=0.15, iteration = 3')
 plt.legend()
-
-#---------------------
-# Change point: local max and min
+plt.show()
+'''
+#############################################################################
+# Change point detection: local max and min on smooth_final_df
+#############################################################################
 from scipy.signal import argrelextrema
-df = pd.DataFrame(data, columns=['data'])
-n = 7  # number of points to be checked before and after
-
-# Find local peaks
-df['min'] = df.iloc[argrelextrema(df.data.values, np.less_equal,
-                    order=n)[0]]['data']
-df['max'] = df.iloc[argrelextrema(df.data.values, np.greater_equal,
-                    order=n)[0]]['data']
-
-# Plot results
-plt.figure(figsize=(9,5))
-plt.scatter(df.index, df['min'], c='r')
-plt.scatter(df.index, df['max'], c='g')
-plt.plot(df.index, df['data'],'black',label='smoothed curve')
-plt.legend()
-plt.xticks(df.index[0:-1:20], x[0:-1:20], rotation='vertical')
-plt.ylabel('mobility');plt.xlabel('date')
-
-#---------------------
 # from segmented time series, get the trend
+import time
+
+
 import trendet
-
-
-
-
-result_desc = trendet.trend_desc(data[150:200])
-
-
-print(result_desc)
-
-
-
-
-'''
-#-----------------------------------------
-# try change point detection
-import ruptures as rpt
-#Convert the time series values to a numpy 1D array
-points=np.array(smooth_curve)
+def from_pd_to_trend_entity(example_user,column_name,n):
+    df = pd.DataFrame(example_user, columns=[column_name])
     
-#RUPTURES PACKAGE
-#Changepoint detection with the Pelt search method
-model="rbf"
-algo = rpt.Pelt(model=model).fit(points)
-result = algo.predict(pen=6) # performs a penalized kernel change point detection
-rpt.display(points, result, figsize=(8, 4))
-plt.title('Change Point Detection: PELT Search Method')
-plt.show()  
+    # index of each user must be ensured to start from day 0
+    df.reset_index(drop=True, inplace=True)
+
+    # Find local peaks
+    df['min'] = df.iloc[argrelextrema(df[column_name].values, np.less_equal,
+                    order=n)[0]][column_name]
+    df['max'] = df.iloc[argrelextrema(df[column_name].values, np.greater_equal,
+                    order=n)[0]][column_name]
+
+    # get indexes of all local min and max, don't forget to add the first index and last index
+    index_min = df.loc[df['min']>0].index.tolist()
+    index_max = df.loc[df['max']>0].index.tolist()
+    index_seg = sorted(list(set(index_min + index_max+[0])))
     
-#Changepoint detection with the Binary Segmentation search method
-model = "l2"  
-algo = rpt.Binseg(model=model).fit(points)
-my_bkps = algo.predict(n_bkps=10) # number of breakpoints
-# show results
-rpt.show.display(points, my_bkps, figsize=(8, 4)) 
-plt.title('Change Point Detection: Binary Segmentation Search Method')
-plt.show()
+    # get trend temporal abstraction
+    trends = []
+    each_trend_tuple=[]
     
-#Changepoint detection with window-based search method
-model = "l2"  
-algo = rpt.Window(width=7, model=model).fit(points)
-my_bkps = algo.predict(n_bkps=10)
-rpt.show.display(points, my_bkps, figsize=(8, 4))
-plt.title('Change Point Detection: Window-Based Search Method, w=7')
-plt.show()
+    for i in range(len(index_seg)-1):
+        previous_point = index_seg[i]+1
+        next_point = index_seg[i+1]    
+        # we define a trend episode from index of min and max points: 
+        # trend.start=previous_point index , so this means the last point in a time series is not counted
+        # trend.end = next_point index +1
+        result_desc = trendet.trend_desc(df[column_name].values[previous_point:next_point])
+        
+        
+        if column_name=='mobility':
+            result_desc = result_desc+'_mob'
+        if column_name=='TST':
+            result_desc = result_desc+'_tst'    
+        if column_name=='SOL':
+            result_desc = result_desc+'_sol'    
+        if column_name=='WASO':
+            result_desc = result_desc+'_wa'    
+        if column_name=='SE':
+            result_desc = result_desc+'_se'    
+        if column_name=='TIB':
+            result_desc = result_desc+'_tib'    
+        
+        trends.append((result_desc))
+        each_trend_tuple.append( (previous_point,next_point) )
     
-#Changepoint detection with dynamic programming search method
-model = "l1"  
-algo = rpt.Dynp(model=model, min_size=3, jump=5).fit(points)
-my_bkps = algo.predict(n_bkps=10)
-rpt.show.display(points, my_bkps, figsize=(8, 4))
-plt.title('Change Point Detection: Dynamic Programming Search Method')
-plt.show()
-'''
-
-'''
-#===================
-import non_para_cpd as cpd
-
-dt=smooth_curve
-dt_days=users_transition[2]['date'].tolist()
-plt.plot(dt_days,dt);plt.xlabel('date'),plt.ylabel('mobility score')
-
-
-import statsmodels.api as sm
-
-res = sm.tsa.seasonal_decompose(y1, freq=60)
-res.plot()
-
-plt.figure(figsize=(9,5))
-plt.plot(x, y1, 'r',label='mobility')
-plt.plot(x,res.trend,'b',label='moving avg, days=60') 
-plt.legend()
     
-# set window: https://my.oschina.net/u/4526838/blog/4430983
-# pettitt's test
-length = len(dt)
-locations=[]
-for i in range(0,length,1):
-    pos,result = cpd.Pettitt_change_point_detection(dt[i:i+199])
-    if result == 'significant':
-        locations.append(pos+i)
-print(set(locations))
+    # if two consecutive segments have same trends,merge them into one
+    # create four lists wth same lengths
+    temp_trends=[trends[0],]
+    temp_each_trend_tuple=[each_trend_tuple[0],]
+    flags_trend=[0,]
+    flags_tuple=[0,]
+    for i in range(len(trends)-1):
+        
+        if trends[i] != trends[i+1]:
+            flags_trend.append(0)
+            flags_tuple.append(0)
+            temp_each_trend_tuple.append(each_trend_tuple[i+1])
+            temp_trends.append(trends[i+1])
+        
+        if trends[i] == trends[i+1]:
+            flags_trend.append(1)
+            temp_trends.append(trends[i+1])
 
-plt.figure(figsize=(10,5))
-plt.plot(range(len(dt)),[int(i) for i in dt])
-for i in locations:
-    plt.plot(i,int(dt[i]),'ks')
-plt.title('Pettitt, window=30 days')
-plt.show()
+            flags_tuple.append(0)
+            flags_tuple[i]=1 # the flag in [i] should be erected
+            # the [i+1]th tuple in temp_each_trend_tuple should be combined
+            temp_each_trend_tuple.append( (each_trend_tuple[i][0],each_trend_tuple[i+1][-1]) )
+    
+    # Remove trends where flags_trend=1
+    trend_combined=[]
+    for i in range(len(temp_trends)):
+        if flags_trend[i]==0:
+            trend_combined.append(temp_trends[i])
+        
+    tuple_combined=[]
+    for i in range(len(temp_each_trend_tuple)):
+        if flags_tuple[i]==0:
+            tuple_combined.append(temp_each_trend_tuple[i])
+        
+            
+    # put tuples of episodes of same trend to same list
+    # Hint: trends and each_trend_tuple have same number of elements, so we can use index of trends to get tuples
+    trend_pd =pd.DataFrame({'trend':trend_combined,'episode':tuple_combined})
+    values_list=[each_trend[1]['episode'].tolist() for each_trend in list(trend_pd.groupby(['trend']))]   
+    keys_list=[each_trend[0] for each_trend in list(trend_pd.groupby(['trend']))]
+    trend_dict_one_ts = dict(zip(keys_list, values_list))
+   
+    return trend_dict_one_ts
 
-# Mann-kendall test
-length = len(dt)
-locations=[]
-for i in range(0,length,1):
-    pos_list = cpd.Kendall_change_point_detection(dt[i:i+29])
-    new_list = [x+i for x in pos_list]
-    locations.extend(new_list)
-print(set(locations))
+example_user = smooth_final_df[0]
+n=7
+trend_dict_mob=from_pd_to_trend_entity(example_user,'TST',n)
 
-plt.figure(figsize=(10,5))
-plt.title('Mann-kendall test, window=30 days')
-plt.plot(range(len(dt)),[int(i) for i in dt])
-for i in locations:
-    plt.plot(i,int(dt[i]),'ks',color='r')
-plt.show()
-
-
-# buishand U test
-length = len(dt)
-locations=[]
-for i in range(0,length,1):
-    pos = cpd.Buishand_U_change_point_detection(dt[i:i+29])
-    locations.append(pos+i)
-print(set(locations))
-
-plt.figure(figsize=(10,5))
-plt.title('Buishand U test, window=30 days')
-plt.plot(range(len(dt)),[int(i) for i in dt])
-for i in locations:
-    plt.plot(i,dt[i],'o',color='r')
-plt.show()
-
-# SNHT test
-dt_array = np.asarray(dt)
-length = len(dt)
-locations=[]
-for i in range(0,length-1):
-    # input for SNHT_change_point_detection needs to be np array
-    pos = cpd.SNHT_change_point_detection(dt_array[i:i+59])
-    locations.append(pos+i)
-print(set(locations))
-
-plt.figure(figsize=(10,5))
-plt.title('SNHT test, window=30 days')
-plt.plot(range(len(dt)),[int(i) for i in dt])
-for i in locations:
-    plt.plot(i,dt[i],'o',color='b')
-plt.show()
+# Apply the function to each of the parameters
 '''
+n = 7  # number of points to be checked before and after
+example_user = smooth_final_df[1]
 
-#############################################################################
-# From user_gender Dataframe, merge selected users' sleep and mobility
-#############################################################################
-user_45_PID=[]
-for each_user_sleep in reformed_sleep_list_no_nap:
-    user_45_PID.append( each_user_sleep['PID'].tolist()[0])
+trend_dict_mob=from_pd_to_trend_entity(example_user,'mobility',n)
+trend_dict_tst=from_pd_to_trend_entity(example_user,'TST',n)
+trend_dict_sol=from_pd_to_trend_entity(example_user,'SOL',n)
+trend_dict_wa=from_pd_to_trend_entity(example_user,'WASO',n)
+trend_dict_se=from_pd_to_trend_entity(example_user,'SE',n)
+trend_dict_tib=from_pd_to_trend_entity(example_user,'TIB',n)
 
-# create 45 people's dataframe and later remove the unwanted 
-final_big_df=pd.DataFrame({})    
-for i in range(len(user_45_PID)):
-    # combine mobility and sleep
-    mobility = reformed_sensor_list[i][['start_day_trucated','num_of_transition']]
-    sleep_features = reformed_sleep_list[i][['PID','start_sleep_time','finish_sleep_time',
-                                        'TST(hour)','WASO(min)','SOL(min)','SE',
-                                        'duraion_in_bed','toss_turn_count','avg_hr','avg_rr',
-                                        'awake_count','bed_exit_count','bed_exit_duration(min)']]
-    mobility.reset_index(drop=True, inplace=True)
-    sleep_features.reset_index(drop=True, inplace=True)
-    merged_df = pd.concat([mobility, sleep_features],axis=1)
-    final_big_df = pd.concat([final_big_df,merged_df])
-
+entity_list={}
+entity_list.update(trend_dict_mob)
+entity_list.update(trend_dict_tst)
+entity_list.update(trend_dict_sol)
+entity_list.update(trend_dict_wa)
+entity_list.update(trend_dict_se) 
+entity_list.update(trend_dict_tib) 
 '''
-9188 rows for 45 people, 7900 rows for 37 people
-'''
+# merged_df_selected = merged_df[merged_df['age']>=90]
+# merged_df_selected = merged_df_selected[merged_df_selected['age']<100]
+merged_df_selected = merged_df[merged_df['home_care_package_level']<4]
+merged_df_selected = merged_df_selected[merged_df_selected['ATSM']>=7]
+# merged_df_selected = merged_df[merged_df['age']>=90]
+# merged_df_selected = merged_df_selected[merged_df_selected['age']<100]
+smooth_df_selected = [each[1] for each in merged_df_selected.groupby(['PID'])]
 
-# remove the unwanted people
-user_gender_37_people = user_gender['record_id'].tolist()  
-final_big_df = final_big_df[final_big_df['PID'].isin(user_gender_37_people)]
-# add gender and age into the df
-final_big_df = final_big_df.merge(user_gender, left_on='PID',right_on='record_id',how = 'inner')
-# remove NaN values if ANY row contains it
-final_big_df = final_big_df.dropna(axis=0, how='any')
-print(len(final_big_df))
+import trendet
+entity_lists=[]
+n=7
+for i in range(len(smooth_df_selected)):
+    example_user =smooth_df_selected[i]
+    trend_dict_mob=from_pd_to_trend_entity(example_user,'mobility',n)
+    trend_dict_tst=from_pd_to_trend_entity(example_user,'TST',n)
+    trend_dict_sol=from_pd_to_trend_entity(example_user,'SOL',n)
+    trend_dict_wa=from_pd_to_trend_entity(example_user,'WASO',n)
+    trend_dict_se=from_pd_to_trend_entity(example_user,'SE',n)
+    trend_dict_tib=from_pd_to_trend_entity(example_user,'TIB',n)
+    entity_list={}
+    
+    entity_list.update(trend_dict_se)
+    # entity_list.update(trend_dict_sol)
+    # entity_list.update(trend_dict_wa)
+    # entity_list.update(trend_dict_se) 
+    # entity_list.update(trend_dict_tib) 
+    entity_list.update(trend_dict_mob)
+    entity_lists.append(entity_list)
+    
+    
 
 
+print('Number of entities:', len(entity_lists))
 
-######################################################
-# Multivariate regression
-df = final_big_df[['PID','start_day_trucated','num_of_transition','TST(hour)','WASO(min)','SOL(min)',
-                    'SE','duraion_in_bed','toss_turn_count','avg_hr','avg_rr','awake_count',
-                    'bed_exit_count','bed_exit_duration(min)','age','gender','ATSM']]
+import KarmaLego as KL
+epsilon = 1
+max_distance = 30
+min_ver_supp = 0.5
+
+start = time.time()
+tree = KL.KarmaLego(epsilon, max_distance, min_ver_supp).run(entity_lists)
+tree.print()
+end = time.time()
+print('time to run', round(end - start), 's')
 
 
-#############################################################################
-# Samplping of data
-#############################################################################
-df = final_big_df[['PID','start_day_trucated','num_of_transition','TST(hour)','WASO(min)','SOL(min)',
-                    
-                    'bed_exit_duration(min)','age','gender','ATSM']]
-# group by individuals
-a = list(df.groupby(['PID']))
-temp_store=[]
-for each in a:
-    temp_store.append(each[1])
+# get number of occurrences of an episode
+occurrence = 0
+key='F_se'
+for each_user_entities in entity_lists:
+    # each_user_entities is a dictionary
+    if key in each_user_entities.keys():
+        tuples = len(each_user_entities[key])
+        occurrence = occurrence + tuples
+print('occurrence=',occurrence)
+
+
+# count occurences and nn-repteated occurence
+the_indexes_for_complementaryRule = [7, 4, 30, 16, 20, 7, 32, 31, 22, 27, 31]
+print(len(the_indexes_for_complementaryRule),'/',
+      len(list(set(the_indexes_for_complementaryRule))), '=',
+      len(the_indexes_for_complementaryRule)/len(list(set(the_indexes_for_complementaryRule))))
+
+the_indexes_for_aRule = [10, 14, 13, 0, 16, 15, 2]
+print(len(the_indexes_for_aRule),'/',
+      len(list(set(the_indexes_for_aRule))), '=',
+      len(the_indexes_for_aRule)/len(list(set(the_indexes_for_aRule))))
+
+print('unique people in two rules',len(list(set(the_indexes_for_complementaryRule+the_indexes_for_aRule))) )
+print(len(list(set(the_indexes_for_complementaryRule+the_indexes_for_aRule)))/len(smooth_df_selected))
 
 #############################################################################
 # SAX discratize mobility one by one
@@ -881,175 +898,147 @@ for each in a:
 #############################################################################
 from SAX import SAX_trans # from a file import a class
 
-# how many alphabets: 5
-# how may j eqalluy sized intervals? Let make it equal to length now
-#----------------------------
-# label all mobility
-ts = df['num_of_transition'].tolist()
-x1 = SAX_trans(ts=ts,w=len(ts),alpha=5)
-st1 = x1.to_sax()
-sax_list = list(st1)
-df['labelled_mobility'] = sax_list
+# how many alphabets: 3
+# how may j eqalluy sized intervals? Granulity = 1 day
 
-
-#----------------------------
-def convert_sax_to_word(sax_list_coverted_to_list):
-    x2 = ['level_1' if x=='a' else x for x in sax_list_coverted_to_list]
-    x3 = ['level_2' if x=='b' else x for x in x2]
-    x4 = ['level_3' if x=='c' else x for x in x3]
-    x5 = ['level_4' if x=='d' else x for x in x4]
-    x = ['level_5' if x=='e' else x for x in x5]
-    return x
-
-# label individual mobility
-labelled_mobility=[]
-for each_user in temp_store:
-#    w = len(each_user['num_of_transition'].tolist())
-    w=16
-    sax_representation_each_user = pd.DataFrame({})
-    # label mobility
-    ts = each_user['num_of_transition'].tolist()
-    x0 = SAX_trans(ts=ts,w=w,alpha=5)
-    sax_representation_each_user['labelled_mobility'] = convert_sax_to_word( list(x0.to_sax()) )
-
-    # label sleep
-    x1 = SAX_trans(ts=each_user['sleep_duration'].tolist(),w=w,alpha=5)
-    sax_representation_each_user['labelled_tst'] = convert_sax_to_word( list(x1.to_sax()) )
-    x2 = SAX_trans(ts=each_user['awake_duration'].tolist(),w=w,alpha=5)
-    sax_representation_each_user['labelled_waso'] = convert_sax_to_word( list( x2.to_sax())  )
-    x3 = SAX_trans(ts=each_user['sleep_onset_duration'].tolist(),w=w,alpha=5)
-    sax_representation_each_user['labelled_sol'] = convert_sax_to_word( list( x3.to_sax() ) )
-    x4 = SAX_trans(ts=each_user['sleep_efficiency'].tolist(),w=w,alpha=5)
-    sax_representation_each_user['labelled_se'] = convert_sax_to_word( list( x4.to_sax() ) )
-    x5 = SAX_trans(ts=each_user['toss_turn_count'].tolist(),w=w,alpha=5)
-    sax_representation_each_user['labelled_ttc'] = convert_sax_to_word( list( x5.to_sax() ) )
-    x6 = SAX_trans(ts=each_user['average_heart_rate'].tolist(),w=w,alpha=5)
-    sax_representation_each_user['labelled_avg_hr'] = convert_sax_to_word( list( x6.to_sax() ) )
-    x7 = SAX_trans(ts=each_user['average_respiration_rate'].tolist(),w=w,alpha=5)
-    sax_representation_each_user['labelled_avg_rr'] = convert_sax_to_word( list( x7.to_sax() ) )
-    x8 = SAX_trans(ts=each_user['awakenings'].tolist(),w=w,alpha=5)
-    sax_representation_each_user['labelled_awake'] = convert_sax_to_word( list( x8.to_sax() ) )
-    x9 = SAX_trans(ts=each_user['bed_exit_duration'].tolist(),w=w,alpha=5)
-    sax_representation_each_user['labelled_ext'] = convert_sax_to_word( list( x9.to_sax() ) )
+def from_pd_to_state_entity(example_user,column_name,alpha):
+    ts = pd.DataFrame(example_user, columns=[column_name])
     
-    labelled_mobility.append(sax_representation_each_user)
+    # Convert to SAX form
+    x1 = SAX_trans(ts=ts,w=len(ts),alpha=alpha)
+    st1 = x1.to_sax()
+    sax_list = list(st1)
+
+    # start and end of each episode
+    states=[]
+    state_change_points=[0] # index of state change points
+    for i in range(len(sax_list)-1):
+        if sax_list[i]==sax_list[i+1]:
+            continue
+        if sax_list[i]!=sax_list[i+1]:
+            states.append(sax_list[i])
+            state_change_points.append(i+1)
+    states.append(sax_list[-1]) # this line ensure that last episode is stored
+
+    # get trend temporal abstraction
+    each_state_tuple=[]  
+    for i in range(len(state_change_points)-1):
+        previous_point = state_change_points[i] + 1
+        next_point = state_change_points[i+1]     
+        each_state_tuple.append((previous_point,next_point))
+    each_state_tuple.append((state_change_points[-1],len(sax_list))) # state_change_points[-1] is the start of last episode   
+    
+    # Adding the name to the segmented time series
+    if column_name=='mobility':
+        result = [stateTA + '_mob' for stateTA in states]
+    if column_name=='TST':
+        result = [stateTA + '_tst' for stateTA in states]
+    if column_name=='SOL':
+        result = [stateTA + '_sol' for stateTA in states]
+    if column_name=='WASO':
+        result = [stateTA + '_wa' for stateTA in states]  
+    if column_name=='SE':
+        result = [stateTA + '_se' for stateTA in states]
+    if column_name=='TIB':
+        result = [stateTA + '_tib' for stateTA in states]
+        
+    # put tuples of episodes of same state to same list
+    # Hint: states and each_state_tuple have same number of elements, so we can use index of states to get tuples
+    state_pd =pd.DataFrame({'state':result,'episode':each_state_tuple})
+    values_list=[each_state[1]['episode'].tolist() for each_state in list(state_pd.groupby(['state']))]   
+    keys_list=[each_state[0] for each_state in list(state_pd.groupby(['state']))]
+    state_dict_one_ts = dict(zip(keys_list, values_list))
+        
+    return state_dict_one_ts
+
+# Apply the function to each of the parameters
+'''
+alpha = 3
+example_user = smooth_final_df[8]
+
+state_dict_mob=from_pd_to_state_entity(example_user,'mobility',alpha)
+state_dict_tst=from_pd_to_state_entity(example_user,'TST',alpha)
+state_dict_sol=from_pd_to_state_entity(example_user,'SOL',alpha)
+state_dict_wa=from_pd_to_state_entity(example_user,'WASO',alpha)
+state_dict_se=from_pd_to_state_entity(example_user,'SE',alpha)
+state_dict_tib=from_pd_to_state_entity(example_user,'TIB',alpha)
+
+entity_state={}
+entity_state.update(state_dict_mob)
+entity_state.update(state_dict_tst)
+entity_state.update(state_dict_sol)
+entity_state.update(state_dict_wa)
+entity_state.update(state_dict_se) 
+entity_state.update(state_dict_tib) 
+'''
 
 
-# select a user
-user_df = labelled_mobility[30]
-user_labelled_list = []
-for (columnName, columnData) in user_df.iteritems():
-    user_labelled_list.append(columnData.tolist())
+# select user groups
+merged_df_selected = merged_df[merged_df['ATSM']>=7]
+# merged_df_selected = merged_df[merged_df['age']>=90]
+# merged_df_selected = merged_df_selected[merged_df_selected['age']<100]
+smooth_df_selected = [each[1] for each in merged_df_selected.groupby(['PID'])]
+
+entity_state_lists=[]
+alpha = 3
+for i in range(len(smooth_df_selected)):
+    example_user =smooth_df_selected[i]
+    state_dict_mob=from_pd_to_state_entity(example_user,'mobility',alpha)
+    state_dict_tst=from_pd_to_state_entity(example_user,'TST',alpha)
+    state_dict_sol=from_pd_to_state_entity(example_user,'SOL',alpha)
+    state_dict_wa=from_pd_to_state_entity(example_user,'WASO',alpha)
+    state_dict_se=from_pd_to_state_entity(example_user,'SE',alpha)
+    state_dict_tib=from_pd_to_state_entity(example_user,'TIB',alpha)
+
+    entity_state={}
+    
+    entity_state.update(state_dict_tib)
+    # entity_state.update(state_dict_sol)
+    # entity_state.update(state_dict_wa)
+    # entity_state.update(state_dict_se) 
+    # entity_state.update(state_dict_tib) 
+    # Remeber: state_dict_mob should always be the last one to put in
+    entity_state.update(state_dict_mob)
+    entity_state_lists.append(entity_state)
+    
 
 
 
 
-# min_length parameter specifies the minimum number of items that you want in your rules
-# Lift of greater than 1 means products A and B are more likely to be bought together. 
-rules = list(apriori(transactions=user_labelled_list, min_support = 0.1, min_confidence = 0.3, min_lift =1 , min_length = 4))
-for item in rules:
-    # first index of the inner list
-    # Contains base item and add item
-    pair = item[0] 
-    items = [x for x in pair]
-    print("Rule: " + items[0] + " -> " + items[1])
-    #second index of the inner list
-    print("Support: " + str(item[1]))
-    #third index of the list located at 0th
-    #of the third index of the inner list
-    print("Confidence: " + str(item[2][0][2]))
-    print("Lift: " + str(item[2][0][3]))
-    print("=====================================")
+print('Number of entities:', len(entity_state_lists))
 
+import KarmaLego as KL
+epsilon = 0
+max_distance = 3
+min_ver_supp = 0.2
 
+start = time.time()
+tree = KL.KarmaLego(epsilon, max_distance, min_ver_supp).run(entity_state_lists)
+tree.print()
+end = time.time()
+print('time to run', round(end - start), 's')
 
+#============================
+the_indexes_for_complementaryRule = [1, 3, 27, 7, 39, 6, 39, 6, 20, 16, 41, 17, 4]+[39, 20, 40, 13, 16, 38, 6, 31, 11]
+print(len(the_indexes_for_complementaryRule),'/',
+      len(list(set(the_indexes_for_complementaryRule))), '=',
+      len(the_indexes_for_complementaryRule)/len(list(set(the_indexes_for_complementaryRule))))
 
+the_indexes_for_aRule = [7, 20, 15, 12, 18, 38, 2, 11, 24]+[26, 7, 1, 39, 37, 3, 24, 5, 40, 41, 20]
+print(len(the_indexes_for_aRule),'/',
+      len(list(set(the_indexes_for_aRule))), '=',
+      len(the_indexes_for_aRule)/len(list(set(the_indexes_for_aRule))))
 
-
-
-
-
-
-supports=[]
-confidences=[]
-lifts=[]
-bases=[]
-adds=[]
-for r in rules:
-    for x in r.ordered_statistics:
-        supports.append(r.support)
-        confidences.append(x.confidence)
-        lifts.append(x.lift)
-        bases.append(list(x.items_base))
-        adds.append(list(x.items_add))
-
-result = pd.DataFrame({
-    'support':supports,
-    'confidence':confidences,
-    'lift':lifts,
-    'base':bases,
-    'add':adds
-})
-result = result[(result['base'].str.len() != 0)]
-
-
-print('min_support>0.1, min_confidence> 0.3,', 'the number of rules we have:', result.shape[0])
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# merge to a big df
-final_big_df_with_SAX=pd.DataFrame({})    
-for each in labelled_mobility:
-    final_big_df_with_SAX = pd.concat([final_big_df_with_SAX,each])
-#final_big_df_with_SAX.to_excel(r'D:\Meeting Updates\sleep_mob_39_users_with_SAX_labelled.xlsx')
-
-final_big_df_with_SAX = final_big_df_with_SAX.assign(num_of_transition=final_big_df_with_SAX['labelled_mobility'])
-final_big_df_with_SAX = final_big_df_with_SAX.drop(columns=['labelled_mobility'])
-
-#=======================
-# now we can perform classification task: use model one to all SVM
-from sklearn.multiclass import OneVsRestClassifier
-from sklearn.svm import SVC
-
-a = list(final_big_df_with_SAX.groupby(['PID']))
-temp_sax_list=[]
-for each in a:
-    temp_sax_list.append(each[1])
-
+print('unique people in two rules',len(list(set(the_indexes_for_complementaryRule+the_indexes_for_aRule))) )
+print(len(list(set(the_indexes_for_complementaryRule+the_indexes_for_aRule)))/42)
 
 #----------------------------
-sampled_df_day_0 = get_sampling_dataset(temp_sax_list,3)
 
-X = sampled_df_day_0.iloc[:,list(range(3,len(sampled_df_day_0.columns)))]
-y = sampled_df_day_0['num_of_transition']
 
-clf = OneVsRestClassifier(SVC()).fit(X, y)
-scores = cross_val_score(clf, X, y, cv=5)
-predictions = cross_val_predict(clf, X, y, cv=5)
 
-precision_score = metrics.precision_score(y, predictions,average='macro')
-f1_score = metrics.f1_score(y, predictions,average='macro')
-print('Cross-Predicted precision_score:', "{:.3f}".format(precision_score))
-print('Cross-Predicted f1_score:',"{:.5f}".format(f1_score))
- 
+
+
+
 
 
 #############################################################################
@@ -1102,70 +1091,5 @@ reformed_room_matrix_df = reformed_room_matrix_df[~reformed_room_matrix_df['PID'
 reformed_room_matrix_df.to_csv(r'F:\Sensor_Data_Processing\floor_plan\37_users_room_distances.csv')
 # plot the distribution
 plt.hist(reformed_room_matrix_df['distance']);plt.xlabel('room distance (steps)')
-
-#############################################################################
-# Correlation analysis - Ratio of outlier
-#############################################################################
-
-
-user_index=17
-
-
-baseline_mobility=reformed_sensor_list[user_index]['num_of_transition'].tolist()[0:15]
-baseline_mobility_lower = np.percentile(np.array(baseline_mobility),5)
-baseline_mobility_upper = np.percentile(np.array(baseline_mobility),95)
-sleep_tst_lower = 6;sleep_tst_upper = 9
-sleep_sol_lower = 5;sleep_sol_upper = 31
-sleep_waso_upper = 31
-
-def get_num_of_outlier_days_with_2_bounds(lower_bound,upper_bound,this_user_list):
-    count_lower = sum(elt < lower_bound for elt in this_user_list)
-    count_upper = sum(elt > upper_bound for elt in this_user_list)
-    return count_lower+count_upper
-
-def get_num_of_outlier_days_with_upper_bounds(upper_bound,this_user_list):
-    count_upper = sum(elt > upper_bound for elt in this_user_list)
-    return count_upper
-
-mobility_abnormal_days = get_num_of_outlier_days_with_2_bounds(baseline_mobility_lower,baseline_mobility_upper,reformed_sensor_list[user_index]['num_of_transition'].tolist())
-tst_abnormal_days = get_num_of_outlier_days_with_2_bounds(sleep_tst_lower,sleep_tst_upper,temp_sleep_duration[user_index])
-sol_abnormal_days = get_num_of_outlier_days_with_2_bounds(sleep_sol_lower,sleep_sol_upper,temp_sleep_onset_duration[user_index])
-waso_abnormal_days = get_num_of_outlier_days_with_upper_bounds(sleep_waso_upper,temp_waso[user_index])
-
-def get_ratio(abnormal_days, temp_this_user_list):
-    return abnormal_days/len(temp_this_user_list)
-
-
-all_user_ratio=pd.DataFrame({})
-for user_index in range(len(reformed_sensor_list)): 
-    # user_index = 0,1,2...
-    baseline_mobility=reformed_sensor_list[user_index]['num_of_transition'].tolist()[0:15]
-    baseline_mobility_lower = np.percentile(np.array(baseline_mobility),5)
-    baseline_mobility_upper = np.percentile(np.array(baseline_mobility),95)
-    sleep_tst_lower = 6;sleep_tst_upper = 9
-    sleep_sol_lower = 5;sleep_sol_upper = 31
-    sleep_waso_upper = 31
-    
-    mobility_abnormal_days = get_num_of_outlier_days_with_2_bounds(baseline_mobility_lower,baseline_mobility_upper,reformed_sensor_list[user_index]['num_of_transition'].tolist())
-    tst_abnormal_days = get_num_of_outlier_days_with_2_bounds(sleep_tst_lower,sleep_tst_upper,temp_sleep_duration[user_index])
-    sol_abnormal_days = get_num_of_outlier_days_with_2_bounds(sleep_sol_lower,sleep_sol_upper,temp_sleep_onset_duration[user_index])
-    waso_abnormal_days = get_num_of_outlier_days_with_upper_bounds(sleep_waso_upper,temp_waso[user_index])
-
-
-    mobility_ratio = get_ratio(mobility_abnormal_days, reformed_sensor_list[user_index]['num_of_transition'].tolist())
-    tst_ratio = get_ratio(tst_abnormal_days, temp_sleep_duration[user_index])
-    sol_ratio = get_ratio(sol_abnormal_days, temp_sleep_onset_duration[user_index])
-    waso_ratio = get_ratio(waso_abnormal_days, temp_waso[user_index])
-
-    this_user_ratio = pd.DataFrame({'PID':user_list_sleep[user_index],'mob':mobility_ratio,
-                                    'tst':tst_ratio,'sol':sol_ratio,'waso':waso_ratio},index=[0])
-    user_demographic_info = user_gender[user_gender['record_id']==user_list_sleep[user_index]]
-    user_demographic_info = user_demographic_info[['home_care_package_level','gender','age','ATSM']]
-    
-    this_user_ratio.reset_index(drop=True, inplace=True)
-    user_demographic_info.reset_index(drop=True, inplace=True)
-    this_user_ratio_with_age = pd.concat([this_user_ratio, user_demographic_info], axis=1)
-
-    all_user_ratio.append(this_user_ratio_with_age)
 
 
