@@ -593,8 +593,7 @@ start_trail_date=user_gender["p_date_completed_b"].values.tolist()
 start_dates = [dt.datetime.strptime(x, '%Y-%m-%d %H:%M:%S').date() for x in start_trail_date]
 age_list =[(x1 - x2)//dt.timedelta(days=365.2425) for (x1, x2) in zip(start_dates, birthday)]
 user_gender['age'] = age_list 
-user_gender.to_csv(r'F:\Sensor_Data_Processing\gender_label\user_demographic.csv')
-
+# user_gender.to_csv(r'F:\Sensor_Data_Processing\gender_label\user_demographic.csv')
 
 start_trail_date=[]
 for each_user in reformed_sleep_list:
@@ -830,7 +829,7 @@ smooth_df_selected = [each[1] for each in merged_df_selected.groupby(['PID'])]
 
 import trendet
 entity_lists=[]
-n=7
+n=7;alpha=5
 for i in range(len(smooth_df_selected)):
     example_user =smooth_df_selected[i]
     trend_dict_mob=from_pd_to_trend_entity(example_user,'mobility',n)
@@ -839,18 +838,24 @@ for i in range(len(smooth_df_selected)):
     trend_dict_wa=from_pd_to_trend_entity(example_user,'WASO',n)
     trend_dict_se=from_pd_to_trend_entity(example_user,'SE',n)
     trend_dict_tib=from_pd_to_trend_entity(example_user,'TIB',n)
+    
+    state_dict_mob=from_pd_to_state_entity(example_user,'mobility',alpha)
+    state_dict_tst=from_pd_to_state_entity(example_user,'TST',alpha)
+    state_dict_sol=from_pd_to_state_entity(example_user,'SOL',alpha)
+    state_dict_wa=from_pd_to_state_entity(example_user,'WASO',alpha)
+    state_dict_se=from_pd_to_state_entity(example_user,'SE',alpha)
+    state_dict_tib=from_pd_to_state_entity(example_user,'TIB',alpha)
+
     entity_list={}
     
-    entity_list.update(trend_dict_se)
-    # entity_list.update(trend_dict_sol)
-    # entity_list.update(trend_dict_wa)
-    # entity_list.update(trend_dict_se) 
-    # entity_list.update(trend_dict_tib) 
     entity_list.update(trend_dict_mob)
+    # entity_list.update(state_dict_se)
+    # entity_list.update(trend_dict_wa)
+    # entity_list.update(trend_dict_sol) 
+    # entity_list.update(state_dict_mob) 
+    entity_list.update(state_dict_se)
     entity_lists.append(entity_list)
     
-    
-
 
 print('Number of entities:', len(entity_lists))
 
@@ -868,7 +873,7 @@ print('time to run', round(end - start), 's')
 
 # get number of occurrences of an episode
 occurrence = 0
-key='F_se'
+key='R_se'
 for each_user_entities in entity_lists:
     # each_user_entities is a dictionary
     if key in each_user_entities.keys():
@@ -878,7 +883,8 @@ print('occurrence=',occurrence)
 
 
 # count occurences and nn-repteated occurence
-the_indexes_for_complementaryRule = [7, 4, 30, 16, 20, 7, 32, 31, 22, 27, 31]
+a=[24, 25, 17, 30, 23, 1, 35, 31, 5, 14, 0, 21, 1, 14, 8, 27, 29, 33, 8, 7, 23, 32, 22, 35, 5, 22, 18, 13, 7, 23, 9, 23, 15, 12, 7, 21, 3, 15, 4, 17, 26, 0, 13, 6, 25, 18, 14, 11, 11, 13, 10, 27, 16, 33, 2, 32, 8, 25, 21, 18, 30, 34, 12, 9, 9, 13, 28, 34, 27, 3, 0, 20, 16, 15, 29, 7, 24, 0, 17, 23, 35, 31, 9, 5, 22, 13, 27, 33, 20, 17, 33, 28, 0, 15, 24]
+the_indexes_for_complementaryRule = a
 print(len(the_indexes_for_complementaryRule),'/',
       len(list(set(the_indexes_for_complementaryRule))), '=',
       len(the_indexes_for_complementaryRule)/len(list(set(the_indexes_for_complementaryRule))))
@@ -908,46 +914,64 @@ def from_pd_to_state_entity(example_user,column_name,alpha):
     x1 = SAX_trans(ts=ts,w=len(ts),alpha=alpha)
     st1 = x1.to_sax()
     sax_list = list(st1)
+    
+    # In sax_list, remove the first and last alphabet to keep the 'normal' states
+    unique_symbols=sorted(list(set(sax_list)))
+    labelled_sax_list=[]
+    for char in sax_list:
+        if char =='a':
+            labelled_sax_list.append('L') # low
+            continue
+        if char == unique_symbols[-1]:
+            labelled_sax_list.append('H') # high
+            continue
+        else:
+            labelled_sax_list.append('N') # normal
 
     # start and end of each episode
     states=[]
     state_change_points=[0] # index of state change points
-    for i in range(len(sax_list)-1):
-        if sax_list[i]==sax_list[i+1]:
+    for i in range(len(labelled_sax_list)-1):
+        if labelled_sax_list[i]==labelled_sax_list[i+1]:
             continue
-        if sax_list[i]!=sax_list[i+1]:
-            states.append(sax_list[i])
+        if labelled_sax_list[i]!=labelled_sax_list[i+1]:
+            states.append(labelled_sax_list[i])
             state_change_points.append(i+1)
-    states.append(sax_list[-1]) # this line ensure that last episode is stored
+    states.append(labelled_sax_list[-1]) # this line ensure that last episode is stored
 
-    # get trend temporal abstraction
+    # get state temporal abstraction
     each_state_tuple=[]  
     for i in range(len(state_change_points)-1):
-        previous_point = state_change_points[i] + 1
+        previous_point = state_change_points[i]+1
         next_point = state_change_points[i+1]     
         each_state_tuple.append((previous_point,next_point))
-    each_state_tuple.append((state_change_points[-1],len(sax_list))) # state_change_points[-1] is the start of last episode   
-    
-    # Adding the name to the segmented time series
-    if column_name=='mobility':
-        result = [stateTA + '_mob' for stateTA in states]
-    if column_name=='TST':
-        result = [stateTA + '_tst' for stateTA in states]
-    if column_name=='SOL':
-        result = [stateTA + '_sol' for stateTA in states]
-    if column_name=='WASO':
-        result = [stateTA + '_wa' for stateTA in states]  
-    if column_name=='SE':
-        result = [stateTA + '_se' for stateTA in states]
-    if column_name=='TIB':
-        result = [stateTA + '_tib' for stateTA in states]
-        
+    each_state_tuple.append((state_change_points[-1],len(labelled_sax_list))) # state_change_points[-1] is the start of last episode   
+          
     # put tuples of episodes of same state to same list
     # Hint: states and each_state_tuple have same number of elements, so we can use index of states to get tuples
-    state_pd =pd.DataFrame({'state':result,'episode':each_state_tuple})
+    state_pd =pd.DataFrame({'state':states,'episode':each_state_tuple})
     values_list=[each_state[1]['episode'].tolist() for each_state in list(state_pd.groupby(['state']))]   
     keys_list=[each_state[0] for each_state in list(state_pd.groupby(['state']))]
     state_dict_one_ts = dict(zip(keys_list, values_list))
+    
+    
+    # Remove other lables, keep normal label
+    del state_dict_one_ts['L']
+    del state_dict_one_ts['H']
+
+    # Adding the name to the segmented time series
+    if column_name=='mobility':
+        state_dict_one_ts['N_mob'] = state_dict_one_ts.pop('N')
+    if column_name=='TST':
+        state_dict_one_ts['N_tst'] = state_dict_one_ts.pop('N')
+    if column_name=='SOL':
+        state_dict_one_ts['N_sol'] = state_dict_one_ts.pop('N')
+    if column_name=='WASO':
+        state_dict_one_ts['N_wa'] = state_dict_one_ts.pop('N')
+    if column_name=='SE':
+        state_dict_one_ts['N_se'] = state_dict_one_ts.pop('N')
+    if column_name=='TIB':
+        state_dict_one_ts['N_tib'] = state_dict_one_ts.pop('N')
         
     return state_dict_one_ts
 
@@ -971,16 +995,18 @@ entity_state.update(state_dict_wa)
 entity_state.update(state_dict_se) 
 entity_state.update(state_dict_tib) 
 '''
-
+  
+    
 
 # select user groups
-merged_df_selected = merged_df[merged_df['ATSM']>=7]
+merged_df_selected = merged_df[merged_df['home_care_package_level']<4]
+merged_df_selected = merged_df_selected[merged_df_selected['ATSM']>=7]
 # merged_df_selected = merged_df[merged_df['age']>=90]
 # merged_df_selected = merged_df_selected[merged_df_selected['age']<100]
 smooth_df_selected = [each[1] for each in merged_df_selected.groupby(['PID'])]
 
 entity_state_lists=[]
-alpha = 3
+alpha = 5
 for i in range(len(smooth_df_selected)):
     example_user =smooth_df_selected[i]
     state_dict_mob=from_pd_to_state_entity(example_user,'mobility',alpha)
@@ -992,7 +1018,7 @@ for i in range(len(smooth_df_selected)):
 
     entity_state={}
     
-    entity_state.update(state_dict_tib)
+    entity_state.update(state_dict_tst)
     # entity_state.update(state_dict_sol)
     # entity_state.update(state_dict_wa)
     # entity_state.update(state_dict_se) 
@@ -1001,16 +1027,12 @@ for i in range(len(smooth_df_selected)):
     entity_state.update(state_dict_mob)
     entity_state_lists.append(entity_state)
     
-
-
-
-
 print('Number of entities:', len(entity_state_lists))
 
 import KarmaLego as KL
-epsilon = 0
-max_distance = 3
-min_ver_supp = 0.2
+epsilon = 1
+max_distance = 30
+min_ver_supp = 0.5
 
 start = time.time()
 tree = KL.KarmaLego(epsilon, max_distance, min_ver_supp).run(entity_state_lists)
@@ -1091,5 +1113,3 @@ reformed_room_matrix_df = reformed_room_matrix_df[~reformed_room_matrix_df['PID'
 reformed_room_matrix_df.to_csv(r'F:\Sensor_Data_Processing\floor_plan\37_users_room_distances.csv')
 # plot the distribution
 plt.hist(reformed_room_matrix_df['distance']);plt.xlabel('room distance (steps)')
-
-
