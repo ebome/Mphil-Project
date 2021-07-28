@@ -11,6 +11,66 @@ import seaborn as sns
 from datetime import datetime
 import statsmodels.api as sm
 
+#############################################################################
+# Topological floor plan
+#############################################################################
+
+all_dacs_room_matrix = pd.read_csv(r'D:\Sensor_Data\data\DACS_Room_Distances.csv')
+room_matrix_grouped_list = [item[1] for item in list(all_dacs_room_matrix.groupby(['PID']))]
+
+room_matrix_grouped_double_side_list = []
+for each_matrix_cleaned in room_matrix_grouped_list:
+    each_matrix_cleaned['PID'] = each_matrix_cleaned['PID'].str.replace('Mar','3')
+    room_matrix_grouped_double_side_list.append(each_matrix_cleaned)
+
+# expand room_matrix_grouped_double_side_list to a big df
+room_matrix_grouped_double_side_df = pd.DataFrame({})
+for each in room_matrix_grouped_double_side_list:
+    room_matrix_grouped_double_side_df = room_matrix_grouped_double_side_df.append(each)
+
+# get the user list from room_matrix_grouped_double_side_list
+room_matrix_users = [item['PID'].tolist()[0] for item in room_matrix_grouped_double_side_list ]
+
+
+#------------------------------------------
+# if we want to get a triangle topological floor plan
+from collections import ChainMap
+
+def getUniqueItems(d):
+    result = {}
+    for key,value in d.items():
+        if value not in result.values():
+            result[key] = value
+    return result   
+
+def remove_duplicate_rooms(unit_matrix):
+    room1_list = unit_matrix['room1_id'].tolist()
+    room2_list = unit_matrix['room2_id'].tolist()
+    room_to_room_list =list(map(list, zip(room1_list,room2_list)))
+    room_to_room_list = [str(sorted(each)) for each in room_to_room_list]
+    indexes = unit_matrix.index.tolist()
+    room_to_room_dict_list = [{k: v} for k, v in zip(indexes, room_to_room_list)]
+    room_to_room_dict =  dict(ChainMap(*room_to_room_dict_list))
+    # remove duplicate values from dictionary
+    result = getUniqueItems(room_to_room_dict)
+    # from result get indexes and keep indexes in dataframe
+    aab = unit_matrix.loc[list(result.keys())]
+    return aab 
+
+reformed_room_matrix_list_temp=[];room_matrix_users=[]    
+for unit_matrix in room_matrix_grouped_list:
+    unit_matrix_cleaned = remove_duplicate_rooms(unit_matrix)
+    unit_matrix_cleaned['PID'] = unit_matrix_cleaned['PID'].str.replace('Mar','3')
+    reformed_room_matrix_list_temp.append(unit_matrix_cleaned)
+    room_matrix_users.append(unit_matrix_cleaned['PID'].tolist()[0])
+
+reformed_room_matrix_df = pd.DataFrame({})
+for each in reformed_room_matrix_list_temp:
+    reformed_room_matrix_df = reformed_room_matrix_df.append(each)
+
+# group all users' floor plan
+all_user_floor_plan = [item[1] for item in list(reformed_room_matrix_df.groupby('PID'))]
+
 ###################################################
 # Sleep summary data: just use csv file
 ###################################################
@@ -139,6 +199,35 @@ def debugging_two_temp_list_value(a1,a2):
 are_user_same = debugging_two_temp_list_value(user_list_sleep,user_list_sensor)
 
 #############################################################################
+# Match sensor/sleep PID with floor plan PID
+#############################################################################
+
+motion_sensor_user_list = [item[0] for item in list(solitary_dacs_sensor.groupby(['PID']))]
+# then take either room_matrix_user or all_user_floor_plan to match users
+# remove some users from floor plan df by find the missing PID in floor plan df
+missing_users_in_sensor = list(set(room_matrix_users) - set(motion_sensor_user_list))
+room_matrix_grouped_double_side_df = room_matrix_grouped_double_side_df[~room_matrix_grouped_double_side_df['PID'].isin(missing_users_in_sensor)]
+# Exactly 44 solitary users without ATSM < 7 have floor plan
+floor_plan_user_list = [item[0] for item in list(room_matrix_grouped_double_side_df.groupby(['PID']))]
+floor_plan_each_user = [item[1] for item in list(room_matrix_grouped_double_side_df.groupby(['PID']))]
+# the single side floor plan
+reformed_room_matrix_df = reformed_room_matrix_df[reformed_room_matrix_df['PID'].isin(floor_plan_user_list)]
+reformed_room_matrix_44_ppl = [item[1] for item in list(reformed_room_matrix_df.groupby(['PID']))]
+
+# get motion/sleep data from 44 people 
+solitary_dacs_sensor_44_ppl = solitary_dacs_sensor[solitary_dacs_sensor['PID'].isin(floor_plan_user_list)]
+solitary_dacs_sleep_44_ppl = solitary_dacs_sleep[solitary_dacs_sleep['PID'].isin(floor_plan_user_list)]
+
+motion_data_each_unit = [item[1] for item in list(solitary_dacs_sensor_44_ppl.groupby(['PID']))]
+motion_data_user_list = [item[0] for item in list(solitary_dacs_sensor_44_ppl.groupby(['PID']))]
+sleep_data_each_unit = [item[1] for item in list(solitary_dacs_sleep_44_ppl.groupby(['PID']))]
+sleep_data_user_list = [item[0] for item in list(solitary_dacs_sleep_44_ppl.groupby(['PID']))]
+
+# debug
+are_user_same = debugging_two_temp_list_value(floor_plan_user_list,sleep_data_user_list)
+
+
+#############################################################################
 # Get the num of room transition
 #############################################################################
 # Remove 'repetitive sensor' and 0,  this function only keeps the first record
@@ -150,9 +239,9 @@ def remove_dup_df(motion_data):
     # remove 0 signal
     drop_dup_df = drop_dup_df[drop_dup_df['sensor_value'] == 1]
     return drop_dup_df
-#----------------------------------------------------------------------------- 
+# Apply the above function 
 sensor_list=[]
-for each_PID in reformed_sensor_list_temp:
+for each_PID in motion_data_each_unit:
     cleaned_each_df = remove_dup_df(each_PID)
     sensor_list.append(cleaned_each_df)
 
@@ -161,51 +250,17 @@ for each_PID in reformed_sensor_list_temp:
 
 # find maximal and minimal snesors
 max_rooms=0
-min_rooms=len(sensor_list[0]['new_sensor_id'].unique().tolist())
+min_rooms=len(sensor_list[0]['sensor_id'].unique().tolist())
 for each_user in sensor_list:
-    test_user_room_list = each_user['new_sensor_id'].unique().tolist()
+    test_user_room_list = each_user['sensor_id'].unique().tolist()
     if len(test_user_room_list) >= max_rooms:
         max_rooms = len(test_user_room_list)
     if len(test_user_room_list) < min_rooms:
         min_rooms = len(test_user_room_list)
-# now we know max_rooms=10, min_rooms=7
+# now we know max_rooms=15, min_rooms=7
 
-'''
-If we check each PID dataframe, we will realize that some sensors are removed
-For example, originally there are 8 sensors (0-7), now after removing there are 
-5 sensors(0,2,4,6,7), so we would better change the sensor names to 0-4
-'''    
-def change_sensor_name(MotionData_ila):
-    room_list = MotionData_ila['sensor_name'].unique().tolist()
-    # the original sensor id are too complicated, change them to 0,1,2,...
-    sensor_id = list(range(len(room_list)))
-    allRooms = MotionData_ila['sensor_name'].values.tolist()
-    temp=[]
-    for i in range(len(allRooms)):
-        for j in range(len(room_list)):
-            if allRooms[i]==room_list[j]:
-                temp.append(sensor_id[j])
-            
-    MotionData_ila['changed_sensor_id'] = temp
-    return MotionData_ila
 
-finally_sensor_list=[]
-for test_user in sensor_list:
-    user_sensor_reading = change_sensor_name(test_user)
-    finally_sensor_list.append(user_sensor_reading)
 #-----------------------------------------------------------------------------  
-
-def labels_between_room(cleaned_ila):
-    tempDF = pd.DataFrame({})
-    temp1=[]
-    for i in range(0, len(cleaned_ila)-1):
-        room_previous_sensor = cleaned_ila.iloc[i]['changed_sensor_id'] 
-        room_next_sensor =  cleaned_ila.iloc[i+1]['changed_sensor_id']
-        label = str(int(room_previous_sensor))+' to '+str(int(room_next_sensor)) 
-        temp1.append(label)
-    tempDF['label'] = temp1
-    return tempDF
-
 # Chopped datetime       
 base = dt.datetime.strptime('2019-01-01 00:00:00', '%Y-%m-%d %H:%M:%S')
 datelist = pd.date_range(base, periods=700).tolist()
@@ -216,76 +271,197 @@ for elt in datelist:
 start_time = choppedTime[0]
 end_time = choppedTime[-1]
 
-# get_transition_arrays will give daily transition numbers
-def get_transition_arrays(cleaned_ila,choppedTime):
-    '''
-    # count how many rooms in this user's house
-    room_num = len(cleaned_ila['changed_sensor_id'].unique().tolist())
-    '''
-    # print(room_num)
-    transition=[]; date_list=[]
-    PID = cleaned_ila['PID'].tolist()[0]
+'''
+user_index=0
+test_user = sensor_list[user_index]
+test_user_floor_plan=floor_plan_each_user[user_index]
+test_user_room_matrix_single_side = reformed_room_matrix_44_ppl[user_index]
+
+distance_dictionary = get_distance_dict_from_floor_plan(test_user_floor_plan)
+
+# remove wardrobe and pantry
+test_user = test_user[~test_user['sensor_name'].str.contains('Pantry')]
+test_user = test_user[~test_user['sensor_name'].str.contains('Wardrobe')]
+
+# sum the steps
+transition=[]; date_list=[]
+PID = test_user['PID'].tolist()[0]
+first_date_in_cleaned_ila = test_user['local_timestamp'].tolist()[0]
+last_date_in_cleaned_ila = test_user['local_timestamp'].tolist()[-1]
+for i in range(len(choppedTime)-1):
+    chopped_one_day  = test_user[test_user['local_timestamp'] > choppedTime[i]]
+    chopped_day  = chopped_one_day[chopped_one_day['local_timestamp'] < choppedTime[i+1]]
+    # The chopped_day is length 0 before the start date
+    if first_date_in_cleaned_ila > choppedTime[i+1] or last_date_in_cleaned_ila < choppedTime[i]:
+        continue
+    # if there is one day missing, just let it go
+    if len(chopped_day)==0:
+        continue
     
-    first_date_in_cleaned_ila = cleaned_ila['local_timestamp'].tolist()[0]
-    last_date_in_cleaned_ila = cleaned_ila['local_timestamp'].tolist()[-1]
+    # starting time of each day's motion data is 6am
+    start_time_str = chopped_day['local_timestamp'].tolist()[0][0:10]+' 06:00:00'
+    chopped_day_morning_time  = chopped_day[chopped_day['local_timestamp'] > start_time_str]
+
+    if len(chopped_day_morning_time)==0:
+        continue
+
+
+    # get the labels from motion data
+    chopped_day_labelled_transition = labels_between_room(chopped_day_morning_time)
+    # Now match the motion data labels with distance dict and sum
+    steps = [distance_dictionary[key] for key in chopped_day_labelled_transition if key in distance_dictionary]
+    transition.append(sum(steps) )
+        
+    # get the date of this step
+    date_of_computed = chopped_day_morning_time['local_timestamp'].tolist()[0][0:10]
+    sensor_date = dt.datetime.strptime(date_of_computed, '%Y-%m-%d')
+    date_list.append(sensor_date)
+
+num_of_transition = pd.DataFrame({'PID':PID,'date':date_list, 'num_of_transition':transition})
+'''
+
+
+
+def get_distance_dict_from_floor_plan(test_user_room_matrix_double_side):
+    keys=[]; values=[]
+    for i in range(len(test_user_room_matrix_double_side)):
+        room_previous_sensor = test_user_room_matrix_double_side.iloc[i]['room1_name'] 
+        room_next_sensor =  test_user_room_matrix_double_side.iloc[i]['room2_name']
+        label = room_previous_sensor+' to '+room_next_sensor
+        keys.append(label)
+        values.append(test_user_room_matrix_double_side.iloc[i]['distance'])
+
+    dict_sensor_id = [{k: v} for k, v in zip(keys, values)]
+    distance_dictionary = {}
+    for each_dict in dict_sensor_id:
+        distance_dictionary.update(each_dict)
+    return distance_dictionary
+
+# dictionary for distance
+#distance_dictionary = get_distance_dict_from_floor_plan(test_user_floor_plan)
+
+
+def labels_between_room(cleaned_ila):
+    temp1=[]
+    for i in range(0, len(cleaned_ila)-1):
+        room_previous_sensor = cleaned_ila.iloc[i]['sensor_name'].strip()
+        room_next_sensor =  cleaned_ila.iloc[i+1]['sensor_name'].strip()
+        label = room_previous_sensor+' to '+room_next_sensor
+        temp1.append(label)
+    return temp1 # return a list
+
+# get_transition_arrays will give daily transition numbers
+def get_transition_arrays(test_user,choppedTime,distance_dictionary):
+    test_user = test_user[~test_user['sensor_name'].str.contains('Pantry')]
+    test_user = test_user[~test_user['sensor_name'].str.contains('Wardrobe')]
+
+    # sum the steps
+    transition=[]; date_list=[]
+    PID = test_user['PID'].tolist()[0]
+    
+    first_date_in_cleaned_ila = test_user['local_timestamp'].tolist()[0]
+    last_date_in_cleaned_ila = test_user['local_timestamp'].tolist()[-1]
     for i in range(len(choppedTime)-1):
-        # get daily motion data
-        choppedila_day  = cleaned_ila[cleaned_ila['local_timestamp'] > choppedTime[i]]
-        choppedila_day  = choppedila_day[choppedila_day['local_timestamp'] < choppedTime[i+1]]
-               
-        # choppedTime start  4-26, hence the choppedila_day is length 0 before the start date
+        chopped_one_day  = test_user[test_user['local_timestamp'] > choppedTime[i]]
+        chopped_day  = chopped_one_day[chopped_one_day['local_timestamp'] < choppedTime[i+1]]
+        # The chopped_day is length 0 before the start date
         if first_date_in_cleaned_ila > choppedTime[i+1] or last_date_in_cleaned_ila < choppedTime[i]:
             continue
         # if there is one day missing, just let it go
-        if len(choppedila_day)==0:
+        if len(chopped_day)==0:
             continue
-        
+    
         # starting time of each day's motion data is 6am
-        start_time_str = choppedila_day['local_timestamp'].tolist()[0][0:10]+' 06:00:00'
-        chopped_day_morning_time  = choppedila_day[choppedila_day['local_timestamp'] > start_time_str]
+        start_time_str = chopped_day['local_timestamp'].tolist()[0][0:10]+' 06:00:00'
+        chopped_day_morning_time  = chopped_day[chopped_day['local_timestamp'] > start_time_str]
         if len(chopped_day_morning_time)==0:
             continue
+
+        # get the labels from motion data
+        chopped_day_labelled_transition = labels_between_room(chopped_day)
+        # Now match the motion data labels with distance dict and sum
+        steps = [distance_dictionary[key] for key in chopped_day_labelled_transition if key in distance_dictionary]
+        transition.append(sum(steps) )
         
-        # label the transitions and change them to merged transition labels
-        ila_lablled = labels_between_room(choppedila_day)
-        labels = ila_lablled['label'].values.tolist()
-        transition.append(len(labels))
-        '''        
-        if room_num == 5:
-            merge_labelled_ilaList = ms.merge_5_sensors(ila_lablled)
-        if room_num == 6:
-            merge_labelled_ilaList = ms.merge_6_sensors(ila_lablled)
-        if room_num == 7:
-            merge_labelled_ilaList = ms.merge_7_sensors(ila_lablled)
-        if room_num == 8:
-            merge_labelled_ilaList = ms.merge_8_sensors(ila_lablled)
-        if room_num == 9:
-            merge_labelled_ilaList = ms.merge_9_sensors(ila_lablled)
-        if room_num == 10:
-            merge_labelled_ilaList = ms.merge_10_sensors(ila_lablled)
-        transition.append(len(merge_labelled_ilaList))
-        '''       
-        date_of_computed = choppedila_day['local_timestamp'].tolist()[0][0:10]
+        # get the date of this step
+        date_of_computed = chopped_day['local_timestamp'].tolist()[0][0:10]
         sensor_date = dt.datetime.strptime(date_of_computed, '%Y-%m-%d')
         date_list.append(sensor_date)
-        
-        num_of_transition = pd.DataFrame({'PID':PID,'date':date_list, 'num_of_transition':transition})
+
+    num_of_transition = pd.DataFrame({'PID':PID,'date':date_list, 'num_of_transition':transition})
     
     return num_of_transition
 
 
-### LONG COMPUTING TIME!
+### LONG COMPUTING TIME to get the dataframe: 4 min
 users_transition=[]
-for each_user in finally_sensor_list:
-    single_user_transition = get_transition_arrays(each_user,choppedTime)
+for i in range(len(sensor_list)):
+    each_user = sensor_list[i]
+    each_user_double_side_floor_plan = floor_plan_each_user[i]
+    each_user_dict = get_distance_dict_from_floor_plan(each_user_double_side_floor_plan)
+    single_user_transition = get_transition_arrays(each_user,choppedTime,each_user_dict)
     users_transition.append(single_user_transition) 
 
-#====================
-# After obtain mobility, remove the dates with mobility=0
-users_transition = [each_user[each_user['num_of_transition'] != 0] for each_user in users_transition]
+
 
 #flat_transition = [item for sub_df in users_transition for item in sub_df['PID']]
 #print('length_flat_transition = ',  len(flat_transition))
+
+
+###################################################
+# Motion sensor: steps each day computed by CSIRO
+###################################################
+all_dacs_mobility = pd.read_csv(r'D:\Sensor_Data\data\all_user_mobility_up_to_Aug.csv')
+all_dacs_mobility = all_dacs_mobility[all_dacs_mobility['value']!=0 ]  
+all_dacs_mobility = all_dacs_mobility[['PID','localTimeMeasured','value']]
+# mobility has time format YY-MM-DD but sensor also has hours
+all_dacs_mobility['local_timestamp'] = [dt.datetime.strptime(date[0:-9], '%d/%m/%Y').date() for date in all_dacs_mobility['localTimeMeasured']] 
+# use motion_data_user_list to pick the users we need
+all_dacs_mobility = all_dacs_mobility[all_dacs_mobility['PID'].isin(motion_data_user_list)]
+
+#---------------------# Match CSIRO mobility dates with my mobility dates
+# Group user's mobility
+all_dacs_mobility_grouped = [item[1] for item in list(all_dacs_mobility.groupby(['PID']))]
+
+# dates that in users_transition but not in all_dacs_mobility_grouped
+matched_date_user_transition = []
+for i in range(len(all_dacs_mobility_grouped)):
+    each_mobility_my = users_transition[i]
+    each_mobility_my = each_mobility_my[each_mobility_my['num_of_transition']!=0]
+    each_mobility_csiro = all_dacs_mobility_grouped[i]
+    each_mobility_my['local_timestamp'] = [each_day.date() for each_day in each_mobility_my['date'].tolist()] 
+    each_PID_mobility_reformed = each_mobility_my[each_mobility_my['local_timestamp'].isin(each_mobility_csiro['local_timestamp'].tolist())]
+    matched_date_user_transition.append(each_PID_mobility_reformed)
+
+
+# debug individual PID's sleep and mobility dates
+'''
+i=5
+each_mobility_my = users_transition[i]
+each_mobility_my = each_mobility_my[each_mobility_my['num_of_transition']!=0]
+each_mobility_csiro = all_dacs_mobility_grouped[i]
+each_mobility_my['local_timestamp'] = [each_day.date() for each_day in each_mobility_my['date'].tolist()] 
+each_PID_mobility_reformed = each_mobility_my[each_mobility_my['local_timestamp'].isin(each_mobility_csiro['local_timestamp'].tolist())]
+
+
+print(len(each_PID_mobility_reformed), len(each_mobility_csiro))
+
+from collections import Counter
+l1 = each_mobility_csiro['local_timestamp'].tolist()
+l2 = each_PID_mobility_reformed['local_timestamp'].tolist()
+c1 = Counter(l1)
+c2 = Counter(l2)
+diff = c1-c2
+print(list(diff.elements()))
+'''
+
+# get list debugged
+matched_date_user_transition_list_length = [len(x) for x in matched_date_user_transition]
+all_dacs_mobility_grouped_list_length = [len(x) for x in all_dacs_mobility_grouped]
+# NOTE: we do not need two lists to have same length, since when remove 0 from csiro mobility, and remove 0 from my mobility
+# we only match my mobolity with csiro, we don't need to match CSIRO mobility with ours
+are_length_same = debugging_two_temp_list_value(matched_date_user_transition_list_length,all_dacs_mobility_grouped_list_length)
+
 
 #############################################################################
 # Remove repetitive dates of sleep recording 
@@ -402,12 +578,12 @@ def get_one_user_sleep_data(test_user,choppedTime_sleep):
 
     return abab
 
-#test_user = reformed_sleep_list_temp[11]
+#test_user = reformed_sleep_list_temp[18]
 #test_user = test_user.dropna(subset=['sleep_duration'])
 #sleep_summary_one_person = get_one_user_sleep_data(test_user,choppedTime_sleep)
 
 reformed_sleep_list_no_nap = []
-for test_user in reformed_sleep_list_temp:
+for test_user in sleep_data_each_unit:
     # drop rows with nan sleep_duration
     test_user = test_user.dropna(subset=['sleep_duration'])
     # apply function to merge multi-episodic sleep records
@@ -416,6 +592,7 @@ for test_user in reformed_sleep_list_temp:
     
 #------------------
 # there are repetitive date appear in reformed_sleep_list_no_nap, so change them
+
 reformed_sleep_list_no_repetitive=[] 
 for each_user_sleep in reformed_sleep_list_no_nap:
     start_sleep_aaaa = each_user_sleep['start_sleep_time'].tolist()
@@ -435,9 +612,9 @@ for each_user_sleep in reformed_sleep_list_no_nap:
         end_sleep_only_date = dt.datetime(b.year,b.month,b.day)
         
         # If start sleep time is between 7pm-11:59pm, and end sleep time is  
-        # next day, count this sleep as this day
+        # next day, count this sleep as next day
         if a <= time_division_today and a>=time_division_7pm and start_sleep_only_date!=end_sleep_only_date:
-            each_sleep_date = a.date() 
+            each_sleep_date = a.date() + timedelta(days=1)
             start_sleep_dates.append(each_sleep_date)
 
         # If start sleep time is between 7pm-11:59pm, and end sleep time is  
@@ -448,14 +625,14 @@ for each_user_sleep in reformed_sleep_list_no_nap:
             start_sleep_dates.append(each_sleep_date)
 
         # If start sleep time is between 0am-6am, and end sleep time is  
-        # same day, count this sleep as previous day
+        # same day, count this sleep as this day
         if a >= time_division_tmr and a<=time_division_6am and start_sleep_only_date==end_sleep_only_date:
-            each_sleep_date = a.date() - timedelta(days=1)
+            each_sleep_date = a.date()
             start_sleep_dates.append(each_sleep_date)
 
     each_user_sleep['date_for_this_sleep'] = start_sleep_dates
     reformed_sleep_list_no_repetitive.append(each_user_sleep)   
-  
+
 #------------------
 # In reformed_sleep_list_no_repetitive, there could be repeated days that one have short TST, one have longer TST
 # Since one day may be recorded twice, once from 7pm-11:59pm, and once recorded from 7pm-6am
@@ -473,88 +650,49 @@ for each_user_sleep in reformed_sleep_list_no_repetitive:
         sleep_episodes_list = pd.concat([sleep_episodes_list,one_episode])
     
     reformed_sleep_list_no_repetead.append(sleep_episodes_list)
-    
+
+
 ###################################################
-# Match CSIRO mobility dates and motion sensor, then sleep dates
+# Match sleep and motion sensor on the dates
 ###################################################
-
-# 1: match CSIRO mobility dates with motion sensor
-# Motion sensor: steps each day computed by CSIRO
-all_dacs_mobility = pd.read_csv(r'D:\Sensor_Data\data\all_user_mobility_up_to_Aug.csv')
-all_dacs_mobility = all_dacs_mobility[all_dacs_mobility['value']!=0 ]  
-all_dacs_mobility = all_dacs_mobility[['PID','localTimeMeasured','value']]
-# mobility has time format YY-MM-DD but sensor also has hours
-all_dacs_mobility['local_timestamp'] = [dt.datetime.strptime(date[0:-9], '%d/%m/%Y').date() for date in all_dacs_mobility['localTimeMeasured']] 
-
-# use either users_transition or reformed_sleep_list_no_repetead to pick the users we need
-users_transition_pid =[]
-for each_user_transition in users_transition:
-    pid = each_user_transition['PID'].values.tolist()[0]
-    users_transition_pid.append(pid)
-all_dacs_mobility = all_dacs_mobility[all_dacs_mobility['PID'].isin(users_transition_pid)]
-
-#---------------------
-# Match CSIRO mobility dates with my mobility dates
-# Group user's mobility
-all_dacs_mobility_grouped = [item[1] for item in list(all_dacs_mobility.groupby(['PID']))]
-
-# dates that in users_transition but not in all_dacs_mobility_grouped
-matched_date_user_transition = []
-for i in range(len(all_dacs_mobility_grouped)):
-    each_mobility_my = users_transition[i]
-    each_mobility_my = each_mobility_my[each_mobility_my['num_of_transition']!=0]
-    each_mobility_csiro = all_dacs_mobility_grouped[i]
-    each_mobility_my['local_timestamp'] = [each_day.date() for each_day in each_mobility_my['date'].tolist()] 
-    each_PID_mobility_reformed = each_mobility_my[each_mobility_my['local_timestamp'].isin(each_mobility_csiro['local_timestamp'].tolist())]
-    matched_date_user_transition.append(each_PID_mobility_reformed)
-
-'''
-# debug individual PID's motion and CSIRO mobility dates
-i=5
-each_mobility_my = users_transition[i]
-each_mobility_my = each_mobility_my[each_mobility_my['num_of_transition']!=0]
-each_mobility_csiro = all_dacs_mobility_grouped[i]
-each_mobility_my['local_timestamp'] = [each_day.date() for each_day in each_mobility_my['date'].tolist()] 
-each_PID_mobility_reformed = each_mobility_my[each_mobility_my['local_timestamp'].isin(each_mobility_csiro['local_timestamp'].tolist())]
-
-
-print(len(each_PID_mobility_reformed), len(each_mobility_csiro))
-
-from collections import Counter
-l1 = each_mobility_csiro['local_timestamp'].tolist()
-l2 = each_PID_mobility_reformed['local_timestamp'].tolist()
-c1 = Counter(l1)
-c2 = Counter(l2)
-diff = c1-c2
-print(list(diff.elements()))
-'''
-# get list debugged
-matched_date_user_transition_list_length = [len(x) for x in matched_date_user_transition]
-all_dacs_mobility_grouped_list_length = [len(x) for x in all_dacs_mobility_grouped]
-# NOTE: we do not need two lists to have same length, since when remove 0 from csiro mobility, and remove 0 from my mobility
-# we only match my mobility with csiro, we don't need to match CSIRO mobility with ours
-are_length_same = debugging_two_temp_list_value(matched_date_user_transition_list_length,all_dacs_mobility_grouped_list_length)
-
-    
-#-------------------------------
-# Same, for each unit in reformed_sleep_list_with_no_repetitive and matched_date_user_transition,remove the 
-# dates that in reformed_sleep_list_with_no_nap but not in matched_date_user_transition
+# Same, for each unit in reformed_sleep_list_with_no_repetitive and users_transition,remove the 
+# dates that in reformed_sleep_list_with_no_nap but not in users_transition
 reformed_sleep_list = [];reformed_sensor_list = []
 for i in range(len(matched_date_user_transition)):
-    # add the day as index of mobility
     each_PID_mobility = matched_date_user_transition[i]
-    each_PID_mobility['start_day_trucated'] = [each_day.date() for each_day in each_PID_mobility['date'].tolist()] 
-    # add the day as index of sleep, change the consecutive cells with reptitive day
     each_PID_sleep = reformed_sleep_list_no_repetead[i]
+    each_PID_mobility['local_timestamp'] = [each_day.date() for each_day in each_PID_mobility['date'].tolist()] 
 
     # match the days
     # mobility should within dates of sleep
-    each_PID_mobility_reformed = each_PID_mobility[each_PID_mobility['start_day_trucated'].isin(each_PID_sleep['date_for_this_sleep'].tolist())]
+    each_PID_mobility_reformed = each_PID_mobility[each_PID_mobility['local_timestamp'].isin(each_PID_sleep['date_for_this_sleep'].tolist())]
     # sleep should within dates of mobility
-    each_PID_sleep_reformed = each_PID_sleep[each_PID_sleep['date_for_this_sleep'].isin(each_PID_mobility_reformed['start_day_trucated'].tolist())]
+    each_PID_sleep_reformed = each_PID_sleep[each_PID_sleep['date_for_this_sleep'].isin(each_PID_mobility_reformed['local_timestamp'].tolist())]
 
     reformed_sensor_list.append(each_PID_mobility_reformed)
     reformed_sleep_list.append(each_PID_sleep_reformed)
+
+
+'''
+# debug individual PID's sleep and mobility dates
+each_PID_mobility = users_transition[0]
+each_PID_sleep = reformed_sleep_list_no_repetead[0]
+each_PID_mobility['local_timestamp'] = [each_day.date() for each_day in each_PID_mobility['date'].tolist()] 
+
+each_PID_mobility_reformed = each_PID_mobility[each_PID_mobility['local_timestamp'].isin(each_PID_sleep['date_for_this_sleep'].tolist())]
+each_PID_sleep_reformed = each_PID_sleep[each_PID_sleep['date_for_this_sleep'].isin(each_PID_mobility_reformed['local_timestamp'].tolist())]
+
+print(len(each_PID_mobility_reformed), len(each_PID_sleep_reformed))
+
+from collections import Counter
+l1 = each_PID_sleep_reformed['date_for_this_sleep'].tolist()
+l2 = each_PID_mobility_reformed['local_timestamp'].tolist()
+c1 = Counter(l1)
+c2 = Counter(l2)
+diff = c2-c1
+print(list(diff.elements()))
+'''
+
 
 # get list debugged
 reformed_sleep_list_length = [len(x) for x in reformed_sleep_list]
@@ -579,6 +717,7 @@ start_trail_date=user_gender["p_date_completed_b"].values.tolist()
 start_dates = [dt.datetime.strptime(x, '%Y-%m-%d %H:%M:%S').date() for x in start_trail_date]
 age_list =[(x1 - x2)//dt.timedelta(days=365.2425) for (x1, x2) in zip(start_dates, birthday)]
 user_gender['age'] = age_list 
+user_gender.to_csv(r'D:\Sensor_Data\data\user_demographic.csv')
 
 
 start_trail_date=[]
@@ -645,75 +784,60 @@ print('avg_of_sleep_duration =',avg_of_sleep_duration)
 user_index=1
 dates = list(range(len(reformed_sensor_list[user_index]['num_of_transition'])))
 x_labels_all = [date.strftime('%Y-%m-%d') for date in reformed_sensor_list[user_index]['local_timestamp'].tolist()]
-x_labels = x_labels_all[0:len(dates):10]
-xInput = list(range(0,len(dates),10))
+x_labels = x_labels_all[0:len(dates):20]
+xInput = list(range(0,len(dates),20))
+label_font_args = dict(fontsize=20, family='Times New Roman')
+axis_font_args = dict(fontsize=8, family='Times New Roman')
 
-plt.figure(figsize=(12,10))
+
+
+plt.figure(figsize=(22,24))
 plt.subplot(4,2,1)
 plt.plot(reformed_sensor_list[user_index]['num_of_transition'].tolist(),
-         color='r')
+         )
 #plt.plot(moving_average(reformed_sensor_list[user_index]['num_of_transition'].tolist(), n=7),label = '7-day moving average')
-plt.ylabel("mobility")
-plt.xlabel('days')
+plt.ylabel("Mobility",**label_font_args);plt.yticks(**label_font_args)
+plt.xticks(xInput,x_labels, rotation='vertical',**axis_font_args)
 
 plt.subplot(4,2,2)
 plt.plot(temp_sleep_duration[user_index])
-plt.ylabel("TST(hour)")
-plt.xlabel('days')
+plt.ylabel("TST(hour)",**label_font_args);plt.yticks(**label_font_args)
+plt.xticks(xInput,x_labels, rotation='vertical',**axis_font_args)
 
 plt.subplot(4,2,3)
 plt.plot(temp_sleep_onset_duration[user_index])
-plt.ylabel("SOL(minute)")
-plt.xlabel('days')
+plt.ylabel("SOL(minute)",**label_font_args);plt.yticks(**label_font_args)
+plt.xticks(xInput,x_labels, rotation='vertical',**axis_font_args)
 
 plt.subplot(4,2,4)
 plt.plot(temp_sleep_efficiency[user_index])
-plt.ylabel("SE")
-plt.xlabel('days')
-
+plt.ylabel("SE",**label_font_args);plt.yticks(**label_font_args)
+plt.xticks(xInput,x_labels, rotation='vertical',**axis_font_args)
 
 plt.subplot(4,2,5)
 plt.plot(temp_waso[user_index])
-plt.ylabel("WASO(minute)")
-plt.xlabel('days')
+plt.ylabel("WASO(minute)",**label_font_args);plt.yticks(**label_font_args)
+plt.xticks(xInput,x_labels, rotation='vertical',**axis_font_args)
 
 plt.subplot(4,2,6)
 plt.plot(temp_sleep_duration_in_bed[user_index])
-plt.ylabel("TIB(hour)")
-plt.xlabel('days')
+plt.ylabel("TIB(hour)",**label_font_args);plt.yticks(**label_font_args)
+plt.xticks(xInput,x_labels, rotation='vertical',**axis_font_args)
 
 plt.subplot(4,2,7)
 plt.plot(temp_sleep_awakeCount[user_index])
-plt.ylabel("Awake")
-plt.xticks(xInput,x_labels, rotation='vertical')
-plt.xlabel('days')
+plt.ylabel("Awake",**label_font_args);plt.yticks(**label_font_args)
+plt.xticks(xInput,x_labels, rotation='vertical',**axis_font_args)
 
 
 # see the moving avg of one parameter
 from scipy.signal import medfilt
-volume = reformed_sensor_list[user_index]['num_of_transition'].tolist()
+volume = reformed_sensor_list[user_index]['value'].tolist()
 filtered = medfilt(volume, kernel_size=7)
 plt.figure(figsize=(8,5))
 plt.plot(volume, label='mobility')
 plt.plot(filtered, label='k=7 filtered')
 plt.legend()
-
-
-
-# see if they have any linear relationship by scatter plots
-plt.figure(figsize=(12,12))
-plt.subplot(2,2,1)
-plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_duration[user_index])
-plt.xlabel('mobility');plt.ylabel('total sleep duration (hour)')
-plt.subplot(2,2,2)
-plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_efficiency[user_index])
-plt.xlabel('mobility');plt.ylabel('sleep efficiency')
-plt.subplot(2,2,3)
-plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_onset_duration[user_index])
-plt.xlabel('mobility');plt.ylabel('sleep onset duration (minute)')
-plt.subplot(2,2,4)
-plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_waso[user_index])
-plt.xlabel('mobility');plt.ylabel('wake after sleep onset duration (minute)')
 
 
 
@@ -787,26 +911,35 @@ for each in temp_store:
 
 
 # see if they have any linear relationship by scatter plots
-user_index=17
-plt.figure(figsize=(12,6))
+user_index=1
+label_font_args = dict(fontsize=12, family='Times New Roman')
+axis_font_args = dict(fontsize=11, family='Times New Roman')
+
+plt.figure(figsize=(15,10))
 plt.subplot(2,3,1)
 plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_duration[user_index])
-plt.xlabel('mobility');plt.ylabel('total sleep duration (hour)')
+plt.xlabel('Mobility',**label_font_args);plt.ylabel('TST (hours)',**label_font_args)
+plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 plt.subplot(2,3,2)
 plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_efficiency[user_index])
-plt.xlabel('mobility');plt.ylabel('sleep efficiency')
+plt.xlabel('Mobility');plt.ylabel('SE',**label_font_args)
+plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 plt.subplot(2,3,3)
 plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_onset_duration[user_index])
-plt.xlabel('mobility');plt.ylabel('sleep onset duration (minute)')
+plt.xlabel('Mobility');plt.ylabel('SOL(minutes)',**label_font_args)
+plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 plt.subplot(2,3,4)
 plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_waso[user_index])
-plt.xlabel('mobility');plt.ylabel('wake after sleep onset duration (minute)')
+plt.xlabel('Mobility');plt.ylabel('WASO (minute)',**label_font_args)
+plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 plt.subplot(2,3,5)
 plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_duration_in_bed[user_index])
-plt.xlabel('mobility');plt.ylabel('TIB (minute)')
+plt.xlabel('Mobility');plt.ylabel('TIB(hours)',**label_font_args)
+plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 plt.subplot(2,3,6)
 plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_awakeCount[user_index])
-plt.xlabel('mobility');plt.ylabel('Awake')
+plt.xlabel('Mobility');plt.ylabel('Awake',**label_font_args)
+plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 
 
 # pearson or spearman plot
@@ -1335,7 +1468,6 @@ post_hoc_dunn_result0= pd.DataFrame({'70VS80':t.iloc[0,1],'70VS90':t.iloc[0,2],
 # non-parameteric testing has to be apply on health people
 user_gender = user_gender[user_gender['ATSM']>=7]
 
-
 # mean for male and female age
 selected_df_male = user_gender[user_gender['gender']==1]
 selected_df_female = user_gender[user_gender['gender']==2]
@@ -1434,44 +1566,54 @@ print(mann_whitney_test_results)
 
 
 #--------------------------------visualization
-'''
+
 # male and female distributions, gender is fixed
 kwargs = dict(alpha=0.5, bins=50)
 c1='#00aaff';c2='y'
 male_label = 'male'
 female_label = 'female'
+label_font_args = dict(fontsize=15, family='Times New Roman')
+axis_font_args = dict(fontsize=12, family='Times New Roman')
 
-plt.figure(figsize=(8,15))
+
+plt.figure(figsize=(14,20))
 plt.subplot(4,2,1)
 plt.hist([item for sublist in mobility_data_male for item in sublist],**kwargs, color=c1, label=male_label+' mobility')
 plt.hist([item for sublist in mobility_data_female for item in sublist],**kwargs, color=c2, label=female_label+' mobility')
-plt.xlabel('steps');plt.legend()
+plt.xlabel('Mobility(steps)',**label_font_args);
+plt.legend();plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 plt.subplot(4,2,2)
 plt.hist([item for sublist in sleep_tst_male for item in sublist],**kwargs, color=c1, label=male_label+' TST')
 plt.hist([item for sublist in sleep_tst_female for item in sublist],**kwargs, color=c2, label=female_label+' TST')
-plt.xlabel('TST(hour)');plt.legend()
+plt.xlabel('TST(hour)',**label_font_args);
+plt.legend();plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 plt.subplot(4,2,3)
 plt.hist([item for sublist in sleep_sol_male for item in sublist],**kwargs, color=c1, label=male_label+' SOL')
 plt.hist([item for sublist in sleep_sol_female for item in sublist],**kwargs, color=c2, label=female_label+' SOL')
-plt.xlabel('SOL(min)');plt.legend()
+plt.xlabel('SOL(min)',**label_font_args);
+plt.legend();plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 plt.subplot(4,2,4)
 plt.hist([item for sublist in sleep_waso_male for item in sublist],**kwargs, color=c1, label=male_label+' WASO')
 plt.hist([item for sublist in sleep_waso_female for item in sublist],**kwargs, color=c2, label=female_label+' WASO')
-plt.xlabel('WASO(min)');plt.legend()
+plt.xlabel('WASO(min)',**label_font_args);
+plt.legend();plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 plt.subplot(4,2,5)
 plt.hist([item for sublist in sleep_duration_in_bed_male for item in sublist],**kwargs, color=c1, label=male_label+' TIB')
 plt.hist([item for sublist in sleep_duration_in_bed_female for item in sublist],**kwargs, color=c2, label=female_label+' TIB')
-plt.xlabel('TIB(hour)');plt.legend()
+plt.xlabel('TIB(hour)',**label_font_args);
+plt.legend();plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 plt.subplot(4,2,6)
 plt.hist([item for sublist in sleep_awake_male for item in sublist],**kwargs, color=c1, label=male_label+' Awake')
 plt.hist([item for sublist in sleep_awake_female for item in sublist],**kwargs, color=c2, label=female_label+' Awake')
-plt.xlabel('awakenings');plt.legend()
+plt.xlabel('Awake',**label_font_args);
+plt.legend();plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 plt.subplot(4,2,7)
 plt.hist([item for sublist in sleep_effi_male for item in sublist],**kwargs, color=c1, label=male_label+' SE')
 plt.hist([item for sublist in sleep_effi_female for item in sublist],**kwargs, color=c2, label=female_label+' SE')
-plt.xlabel('SE');plt.legend()
+plt.xlabel('SE',**label_font_args);
+plt.legend();plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 
-'''
+
 
 
 #--------------------------------------------
@@ -1596,45 +1738,56 @@ u,p = two_group_Mann_Whitney_test(mobility_data_70s, mobility_data_80s)
 
 
 #--------------Visualization
-'''
-kwargs = dict(alpha=0.5, bins=100)
-plt.figure(figsize=(8,15))
+
+kwargs = dict(alpha=0.5, bins=50)
+label_font_args = dict(fontsize=15, family='Times New Roman')
+axis_font_args = dict(fontsize=12, family='Times New Roman')
+
+
+plt.figure(figsize=(14,20))
 plt.subplot(4,2,1)
 plt.hist([item for sublist in mobility_data_70s for item in sublist],**kwargs, color='b', label='70s mobility')
 plt.hist([item for sublist in mobility_data_80s for item in sublist],**kwargs, color='r', label='80s mobility')
 plt.hist([item for sublist in mobility_data_90s for item in sublist],**kwargs, color='g', label='90s mobility')
-plt.legend()
+plt.xlabel('Mobility(steps)',**label_font_args);
+plt.legend();plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 plt.subplot(4,2,2)
 plt.hist([item for sublist in sleep_tst_70s for item in sublist],**kwargs, color='b', label='70s TST')
 plt.hist([item for sublist in sleep_tst_80s for item in sublist],**kwargs, color='r', label='80s TST')
 plt.hist([item for sublist in sleep_tst_90s for item in sublist],**kwargs, color='g', label='90s TST')
-plt.legend()
+plt.legend();plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
+plt.xlabel('TST(hours)',**label_font_args);
 plt.subplot(4,2,3)
 plt.hist([item for sublist in sleep_sol_70s for item in sublist],**kwargs, color='b', label='70s SOL')
 plt.hist([item for sublist in sleep_sol_80s for item in sublist],**kwargs, color='r', label='80s SOL')
 plt.hist([item for sublist in sleep_sol_90s for item in sublist],**kwargs, color='g', label='90s SOL')
-plt.legend()
+plt.legend();plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
+plt.xlabel('SOL(minutes)',**label_font_args);
 plt.subplot(4,2,4)
 plt.hist([item for sublist in sleep_waso_70s for item in sublist],**kwargs, color='b', label='70s WASO')
 plt.hist([item for sublist in sleep_waso_80s for item in sublist],**kwargs, color='r', label='80s WASO')
 plt.hist([item for sublist in sleep_waso_90s for item in sublist],**kwargs, color='g', label='90s WASO')
-plt.legend()
+plt.legend();plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
+plt.xlabel('WASO(minutes)',**label_font_args);
 plt.subplot(4,2,5)
 plt.hist([item for sublist in sleep_duration_in_bed_70s for item in sublist],**kwargs, color='b', label='70s TIB')
 plt.hist([item for sublist in sleep_duration_in_bed_80s for item in sublist],**kwargs, color='r', label='80s TIB')
 plt.hist([item for sublist in sleep_duration_in_bed_90s for item in sublist],**kwargs, color='g', label='90s TIB')
-plt.legend()
+plt.legend();plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
+plt.xlabel('TIB(hours)',**label_font_args);
 plt.subplot(4,2,6)
 plt.hist([item for sublist in sleep_awake_70s for item in sublist],**kwargs, color='b', label='70s Awake')
 plt.hist([item for sublist in sleep_awake_80s for item in sublist],**kwargs, color='r', label='80s Awake')
 plt.hist([item for sublist in sleep_awake_90s for item in sublist],**kwargs, color='g', label='90s Awake')
-plt.legend()
+plt.legend();plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
+plt.xlabel('Awake',**label_font_args);
 plt.subplot(4,2,7)
 plt.hist([item for sublist in sleep_effi_70s for item in sublist],**kwargs, color='b', label='70s SE')
 plt.hist([item for sublist in sleep_effi_80s for item in sublist],**kwargs, color='r', label='80s SE')
 plt.hist([item for sublist in sleep_effi_90s for item in sublist],**kwargs, color='g', label='90s SE')
-plt.legend()
-'''
+plt.legend();plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
+plt.xlabel('SE',**label_font_args);
+
 
 #############################################################################
 # get basic stats and tests
