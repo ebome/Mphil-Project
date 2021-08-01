@@ -938,15 +938,13 @@ plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 # Regression model
 #############################################################################
 # one user's regression CCPR plots
-test_user=temp_store[4]
+test_user=temp_store[1]
 X = test_user[['SE','TST','SOL','WASO','TIB','awake_count']]
 Y = test_user['steps']
 
 fig = plt.figure(figsize=(16, 24))
 model = sm.OLS(Y, X).fit()
 sm.graphics.plot_ccpr_grid(model, fig=fig)
-
-
 
 
 # NON-STEPWISE REGRESSION
@@ -1397,7 +1395,19 @@ OLS_result_stepwise = pd.DataFrame({'age':age_list,'gender':gender_list,'data_po
                            'coef_SOL':sol_coefs,'coef_WASO':waso_coefs,'coef_TIB':tib_coefs,
                            'coef_Awake':awake_coefs,'coef_SE':se_coefs,'p_value':p_val_list})    
     
+# distributions of adjusted R-squared 
+label_font_args = dict(fontsize=15, family='Times New Roman')
+axis_font_args = dict(fontsize=12, family='Times New Roman')
 
+plt.figure(figsize=(16,20))
+plt.subplot(4,2,1)
+plt.hist(models_adj_r_squared,bins=6,edgecolor='black', linewidth=1.2)
+plt.xlabel('Adjusted R-sqaured',**label_font_args);
+plt.ylabel('Occurrences in models',**label_font_args);
+plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
+
+    
+    
 #OLS_result_stepwise.to_excel(r'F:/OLS_reuslts_36_individuals_backward_selection_highest_R_squared.xlsx',index=False)
 '''
 OLS_result_stepwise.loc[OLS_result_stepwise['gender'] ==1, 'gender'] = 'male'
