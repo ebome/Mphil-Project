@@ -84,7 +84,6 @@ dacs_all_sleep = dacs_all_sleep.drop(['sleep_data_id','room_id','sensor_type','s
 # change 'rebaseline' in PID for 3-175, 3-183
 dacs_all_sleep['PID'] = [x.replace(' Rebaseline','') for x in dacs_all_sleep['PID']]
 
-
 # count the number of PID and see how many days of data each PID has
 output = dacs_all_sleep.groupby('PID').size()
 # Remove the PID with output days less than 40 days from dacs_all_sleep
@@ -388,7 +387,7 @@ def get_transition_arrays(test_user,choppedTime,distance_dictionary):
         sensor_date = dt.datetime.strptime(date_of_computed, '%Y-%m-%d')
         date_list.append(sensor_date)
 
-    num_of_transition = pd.DataFrame({'PID':PID,'date':date_list, 'num_of_transition':transition})
+    num_of_transition = pd.DataFrame({'PID':PID,'date':date_list, 'steps':transition})
     
     return num_of_transition
 
@@ -427,7 +426,7 @@ all_dacs_mobility_grouped = [item[1] for item in list(all_dacs_mobility.groupby(
 matched_date_user_transition = []
 for i in range(len(all_dacs_mobility_grouped)):
     each_mobility_my = users_transition[i]
-    each_mobility_my = each_mobility_my[each_mobility_my['num_of_transition']!=0]
+    each_mobility_my = each_mobility_my[each_mobility_my['steps']!=0]
     each_mobility_csiro = all_dacs_mobility_grouped[i]
     each_mobility_my['local_timestamp'] = [each_day.date() for each_day in each_mobility_my['date'].tolist()] 
     each_PID_mobility_reformed = each_mobility_my[each_mobility_my['local_timestamp'].isin(each_mobility_csiro['local_timestamp'].tolist())]
@@ -438,7 +437,7 @@ for i in range(len(all_dacs_mobility_grouped)):
 '''
 i=5
 each_mobility_my = users_transition[i]
-each_mobility_my = each_mobility_my[each_mobility_my['num_of_transition']!=0]
+each_mobility_my = each_mobility_my[each_mobility_my['steps']!=0]
 each_mobility_csiro = all_dacs_mobility_grouped[i]
 each_mobility_my['local_timestamp'] = [each_day.date() for each_day in each_mobility_my['date'].tolist()] 
 each_PID_mobility_reformed = each_mobility_my[each_mobility_my['local_timestamp'].isin(each_mobility_csiro['local_timestamp'].tolist())]
@@ -611,23 +610,23 @@ for each_user_sleep in reformed_sleep_list_no_nap:
         start_sleep_only_date = dt.datetime(a.year,a.month,a.day)
         end_sleep_only_date = dt.datetime(b.year,b.month,b.day)
         
-        # If start sleep time is between 7pm-11:59pm, and end sleep time is  
-        # next day, count this sleep as next day
+        # If start sleep time is between 4pm-11:59pm, and end sleep time is  
+        # next day, count this sleep as next day. This sleep actually occurs on day d
         if a <= time_division_today and a>=time_division_7pm and start_sleep_only_date!=end_sleep_only_date:
             each_sleep_date = a.date() + timedelta(days=1)
             start_sleep_dates.append(each_sleep_date)
 
-        # If start sleep time is between 7pm-11:59pm, and end sleep time is  
-        # same day, count this sleep as this day
+        # If start sleep time is between 4pm-11:59pm, and end sleep time is  
+        # same day, count this sleep as next day. This sleep actually occurs on day d-1
         ##### if not adding this line, user_index= 23 line 325,line 326 would be same day
         if a <= time_division_today and a>=time_division_7pm and start_sleep_only_date==end_sleep_only_date:
-            each_sleep_date = a.date()
+            each_sleep_date = a.date() + timedelta(days=1)
             start_sleep_dates.append(each_sleep_date)
 
         # If start sleep time is between 0am-6am, and end sleep time is  
-        # same day, count this sleep as this day
+        # same day, count this sleep as next day. This sleep actually occurs on day d
         if a >= time_division_tmr and a<=time_division_6am and start_sleep_only_date==end_sleep_only_date:
-            each_sleep_date = a.date()
+            each_sleep_date = a.date() 
             start_sleep_dates.append(each_sleep_date)
 
     each_user_sleep['date_for_this_sleep'] = start_sleep_dates
@@ -781,8 +780,8 @@ print('avg_of_sleep_duration =',avg_of_sleep_duration)
 #    return ret[n - 1:] / n
 
 
-user_index=1
-dates = list(range(len(reformed_sensor_list[user_index]['num_of_transition'])))
+user_index=4
+dates = list(range(len(reformed_sensor_list[user_index]['steps'])))
 x_labels_all = [date.strftime('%Y-%m-%d') for date in reformed_sensor_list[user_index]['local_timestamp'].tolist()]
 x_labels = x_labels_all[0:len(dates):20]
 xInput = list(range(0,len(dates),20))
@@ -793,9 +792,9 @@ axis_font_args = dict(fontsize=8, family='Times New Roman')
 
 plt.figure(figsize=(22,24))
 plt.subplot(4,2,1)
-plt.plot(reformed_sensor_list[user_index]['num_of_transition'].tolist(),
+plt.plot(reformed_sensor_list[user_index]['steps'].tolist(),
          )
-#plt.plot(moving_average(reformed_sensor_list[user_index]['num_of_transition'].tolist(), n=7),label = '7-day moving average')
+#plt.plot(moving_average(reformed_sensor_list[user_index]['steps'].tolist(), n=7),label = '7-day moving average')
 plt.ylabel("Mobility",**label_font_args);plt.yticks(**label_font_args)
 plt.xticks(xInput,x_labels, rotation='vertical',**axis_font_args)
 
@@ -830,17 +829,6 @@ plt.ylabel("Awake",**label_font_args);plt.yticks(**label_font_args)
 plt.xticks(xInput,x_labels, rotation='vertical',**axis_font_args)
 
 
-# see the moving avg of one parameter
-from scipy.signal import medfilt
-volume = reformed_sensor_list[user_index]['value'].tolist()
-filtered = medfilt(volume, kernel_size=7)
-plt.figure(figsize=(8,5))
-plt.plot(volume, label='mobility')
-plt.plot(filtered, label='k=7 filtered')
-plt.legend()
-
-
-
 #############################################################################
 # From user_gender Dataframe, merge selected users' sleep and mobility
 #############################################################################
@@ -852,7 +840,7 @@ user_44_PID_sensor=[each_user_sensor['PID'].tolist()[0] for each_user_sensor in 
 final_big_df=pd.DataFrame({})    
 for i in range(len(user_44_PID_sleep)):
     # combine mobility and sleep
-    mobility = reformed_sensor_list[i][['local_timestamp','num_of_transition']]
+    mobility = reformed_sensor_list[i][['local_timestamp','steps']]
     sleep_features = reformed_sleep_list[i][['PID','start_sleep_time','finish_sleep_time',
                                         'TST(hour)','WASO(min)','SOL(min)','SE',
                                         'duraion_in_bed','toss_turn_count','avg_hr','avg_rr',
@@ -861,6 +849,10 @@ for i in range(len(user_44_PID_sleep)):
     sleep_features.reset_index(drop=True, inplace=True)
     merged_df = pd.concat([mobility, sleep_features],axis=1)
     final_big_df = pd.concat([final_big_df,merged_df])
+# change the name of columns to better one
+final_big_df.columns = ['date','steps','PID','start_sleep_time','finish_sleep_time',
+                        'TST','WASO','SOL','SE','TIB','toss_turn_count','avg_hr','avg_rr',
+                        'awake_count','bed_exit_count','bed_exit_duration(min)']    
 
 '''
 9117 for 44 ppl, 7853 rows for 37 people
@@ -880,8 +872,8 @@ print(len(final_big_df))
 # Multivariate regression
 ######################################################
 # Samplping of data
-df = final_big_df[['PID','local_timestamp','num_of_transition','TST(hour)','WASO(min)','SOL(min)','duraion_in_bed',
-                    'SE','awake_count','avg_hr','avg_rr','age','gender']]
+df = final_big_df[['PID','date','steps','TST','WASO','SOL','TIB',
+                    'SE','awake_count','age','gender']]
 # group by individuals
 a = list(df.groupby(['PID']))
 temp_store=[]
@@ -900,7 +892,7 @@ for each in temp_store:
 flat_temp_store_36_ppl = sum([len(each) for each in temp_store])
 print('flat_temp_store_36_ppl = ', flat_temp_store_36_ppl)
 '''
-7847 rows for 36 people
+8136 rows for 36 people
 '''
 
 # make temp_store a big merged df
@@ -911,61 +903,51 @@ for each in temp_store:
 
 
 # see if they have any linear relationship by scatter plots
-user_index=1
+user_index=4
 label_font_args = dict(fontsize=12, family='Times New Roman')
 axis_font_args = dict(fontsize=11, family='Times New Roman')
 
 plt.figure(figsize=(15,10))
 plt.subplot(2,3,1)
-plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_duration[user_index])
+plt.scatter(reformed_sensor_list[user_index]['steps'].tolist(), temp_sleep_duration[user_index])
 plt.xlabel('Mobility',**label_font_args);plt.ylabel('TST (hours)',**label_font_args)
 plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 plt.subplot(2,3,2)
-plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_efficiency[user_index])
-plt.xlabel('Mobility');plt.ylabel('SE',**label_font_args)
+plt.scatter(reformed_sensor_list[user_index]['steps'].tolist(), temp_sleep_efficiency[user_index])
+plt.xlabel('Mobility',**label_font_args);plt.ylabel('SE',**label_font_args)
 plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 plt.subplot(2,3,3)
-plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_onset_duration[user_index])
-plt.xlabel('Mobility');plt.ylabel('SOL(minutes)',**label_font_args)
+plt.scatter(reformed_sensor_list[user_index]['steps'].tolist(), temp_sleep_onset_duration[user_index])
+plt.xlabel('Mobility',**label_font_args);plt.ylabel('SOL(minutes)',**label_font_args)
 plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 plt.subplot(2,3,4)
-plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_waso[user_index])
-plt.xlabel('Mobility');plt.ylabel('WASO (minute)',**label_font_args)
+plt.scatter(reformed_sensor_list[user_index]['steps'].tolist(), temp_waso[user_index])
+plt.xlabel('Mobility',**label_font_args);plt.ylabel('WASO (minute)',**label_font_args)
 plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 plt.subplot(2,3,5)
-plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_duration_in_bed[user_index])
-plt.xlabel('Mobility');plt.ylabel('TIB(hours)',**label_font_args)
+plt.scatter(reformed_sensor_list[user_index]['steps'].tolist(), temp_sleep_duration_in_bed[user_index])
+plt.xlabel('Mobility',**label_font_args);plt.ylabel('TIB(hours)',**label_font_args)
 plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 plt.subplot(2,3,6)
-plt.scatter(reformed_sensor_list[user_index]['num_of_transition'].tolist(), temp_sleep_awakeCount[user_index])
-plt.xlabel('Mobility');plt.ylabel('Awake',**label_font_args)
+plt.scatter(reformed_sensor_list[user_index]['steps'].tolist(), temp_sleep_awakeCount[user_index])
+plt.xlabel('Mobility',**label_font_args);plt.ylabel('Awake',**label_font_args)
 plt.xticks(**axis_font_args);plt.yticks(**axis_font_args)
 
-
-# pearson or spearman plot
-test_user = temp_store[9][['num_of_transition','TST(hour)','WASO(min)','SOL(min)','duraion_in_bed',
-                    'SE','awake_count']]
-test_user = test_user.rename(columns={"num_of_transition": "mobility", "TST(hour)": "TST",'WASO(min)':'WASO',
-                                      'SOL(min)':'SOL','duraion_in_bed':'TIB','awake_count':'Awake'})
-fig, ax = plt.subplots(figsize=(8,4))
-corr= test_user.corr(method='spearman').round(2)
-# Getting the Upper Triangle of the co-relation matrix
-matrix = np.triu(corr)
-
-# using the upper triangle matrix as mask 
-sns.heatmap(corr, annot = True, cbar=False,mask=matrix, 
-            center= 0, cmap= 'coolwarm', square=True)
-plt.show()
 
 #############################################################################
 # Regression model
 #############################################################################
-test_user=temp_store[5]
-X = test_user[['SE','TST(hour)','SOL(min)','WASO(min)','duraion_in_bed','awake_count']]
-Y = test_user['num_of_transition']
+# one user's regression CCPR plots
+test_user=temp_store[4]
+X = test_user[['SE','TST','SOL','WASO','TIB','awake_count']]
+Y = test_user['steps']
+
+fig = plt.figure(figsize=(16, 24))
 model = sm.OLS(Y, X).fit()
-fig = sm.graphics.plot_ccpr(model, "WASO(min)")
-fig.tight_layout(pad=1.0)
+sm.graphics.plot_ccpr_grid(model, fig=fig)
+
+
+
 
 # NON-STEPWISE REGRESSION
 rsquared_adj_list=[]
@@ -975,8 +957,8 @@ valid_len=[]
 age_list=[]
 gender_list=[]
 for test_user in temp_store:
-    X = test_user[['SE','TST(hour)','SOL(min)','WASO(min)','duraion_in_bed','awake_count']]
-    Y = test_user['num_of_transition']
+    X = test_user[['SE','TST','SOL','WASO','TIB','awake_count']]
+    Y = test_user['steps']
     model = sm.OLS(Y, X).fit()
     predictions = model.predict(X)
     rsquared_adj_list.append(model.rsquared_adj)
@@ -988,11 +970,11 @@ for test_user in temp_store:
 # split each ceof from parameter_list
 sol_coefs=[];waso_coefs=[];tst_coefs=[];tib_coefs=[];awake_coefs=[];se_coefs=[]
 for each_user_coef in parameters_list:
-    tst_coefs.append(each_user_coef.loc['TST(hour)'])
-    sol_coefs.append(each_user_coef.loc['SOL(min)'])
+    tst_coefs.append(each_user_coef.loc['TST'])
+    sol_coefs.append(each_user_coef.loc['SOL'])
     awake_coefs.append(each_user_coef.loc['awake_count'])
-    tib_coefs.append(each_user_coef.loc['duraion_in_bed'])
-    waso_coefs.append(each_user_coef.loc['WASO(min)'])
+    tib_coefs.append(each_user_coef.loc['TIB'])
+    waso_coefs.append(each_user_coef.loc['WASO'])
     se_coefs.append(each_user_coef.loc['SE'])
 
 
@@ -1377,9 +1359,9 @@ p_val_list=[]
 age_list=[]
 gender_list=[]
 for test_user in temp_store_SE_100:
-    df = pd.DataFrame({'mobility':test_user.loc[:, 'num_of_transition'],'TST':test_user.loc[:, 'TST(hour)'],
-                   'SOL':test_user.loc[:, 'SOL(min)'],'WASO':test_user.loc[:, 'WASO(min)'],
-                   'TIB':test_user.loc[:, 'duraion_in_bed'],'Awake':test_user.loc[:, 'awake_count'],
+    df = pd.DataFrame({'mobility':test_user.loc[:, 'steps'],'TST':test_user.loc[:, 'TST'],
+                   'SOL':test_user.loc[:, 'SOL'],'WASO':test_user.loc[:, 'WASO'],
+                   'TIB':test_user.loc[:, 'TIB'],'Awake':test_user.loc[:, 'awake_count'],
                    'SE':test_user.loc[:, 'SE']
                    })
 
@@ -1414,22 +1396,7 @@ OLS_result_stepwise = pd.DataFrame({'age':age_list,'gender':gender_list,'data_po
                            'R_squared_adj':models_adj_r_squared,'coef_TST':tst_coefs,
                            'coef_SOL':sol_coefs,'coef_WASO':waso_coefs,'coef_TIB':tib_coefs,
                            'coef_Awake':awake_coefs,'coef_SE':se_coefs,'p_value':p_val_list})    
-'''
-test_user=temp_store[13]
-df = pd.DataFrame({'mobility':test_user.loc[:, 'num_of_transition'],'TST':test_user.loc[:, 'TST(hour)'],
-                   'SOL':test_user.loc[:, 'SOL(min)'],'WASO':test_user.loc[:, 'WASO(min)'],
-                   'TIB':test_user.loc[:, 'duraion_in_bed'],'Awake':test_user.loc[:, 'awake_count'],
-                   'SE':test_user.loc[:, 'SE']
-                   })
-
-#plt.scatter(df['WASO'],df['mobility'])    
-
-the_model = FeatureSelection().stepwise(df=df, response='mobility', direction='both',max_iter=5,criterion='ssr')  
-# criterion='ssr'is to remove coef with p-val>0.05
-fig = sm.graphics.plot_ccpr(the_model.stepwise_model, "TIB")
-fig.tight_layout(pad=1.0)    
-'''
- 
+    
 
 #OLS_result_stepwise.to_excel(r'F:/OLS_reuslts_36_individuals_backward_selection_highest_R_squared.xlsx',index=False)
 '''
