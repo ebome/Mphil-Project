@@ -446,7 +446,7 @@ for each_user_sleep in reformed_sleep_list_no_nap:
         # same day, count this sleep as this day
         ##### if not adding this line, user_index= 23 line 325,line 326 would be same day
         if a <= time_division_today and a>=time_division_7pm and start_sleep_only_date==end_sleep_only_date:
-            each_sleep_date = a.date()
+            each_sleep_date = a.date() 
             start_sleep_dates.append(each_sleep_date)
 
         # If start sleep time is between 0am-6am, and end sleep time is  
@@ -1113,3 +1113,5 @@ reformed_room_matrix_df = reformed_room_matrix_df[~reformed_room_matrix_df['PID'
 reformed_room_matrix_df.to_csv(r'F:\Sensor_Data_Processing\floor_plan\37_users_room_distances.csv')
 # plot the distribution
 plt.hist(reformed_room_matrix_df['distance']);plt.xlabel('room distance (steps)')
+
+
