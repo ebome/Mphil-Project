@@ -128,11 +128,11 @@ def temporal_relations(ti_1, ti_2, epsilon, max_distance):
     A_start, A_end = ti_1
     B_start, B_end = ti_2
     if epsilon < B_start - A_end < max_distance:    # before
-        return 'e'
+        return '<'
     elif abs(B_start - A_end) <= epsilon:   # meets
-        return 'j'
-    elif B_start - A_start > epsilon and A_end - B_start > epsilon and B_end - A_end > epsilon and B_start - A_start < max_distance:     # overlaps
-        return 'i'
+        return 'm'
+    # elif B_start - A_start > epsilon and A_end - B_start > epsilon and B_end - A_end > epsilon:     # overlaps
+    #     return 'o'
     # elif B_start - A_start > epsilon and A_end - B_end > epsilon:   # contains
     #     return 'c'
     # elif B_start - A_start > epsilon and abs(B_end - A_end) <= epsilon:     # finish by
