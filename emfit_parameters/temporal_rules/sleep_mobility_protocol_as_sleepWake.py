@@ -823,12 +823,15 @@ final_big_df.to_excel(r'F:\Sensor_Data_Processing\temporal_rules\smoothed_final_
 # Visulization
 #====================================
 # example of LOWESS smooth curve
-case_df = reformed_sensor_list[6]
-y1=np.asarray(case_df['steps'].tolist() )
+case_df = reformed_sensor_list[30]
+
+
+y1=np.asarray(reformed_sleep_list[30]['TST(hour)'].tolist() )
 # to run LOWESS, ensure x axis is in correct format
 x = pd.to_datetime(case_df['date'], format='%d/%m/%Y  %H:%M')   
 smooth_curve = np.asarray( lowess(y1, x, frac=0.15, it=4)[:,1] )
 case_df['smooth_curve']=smooth_curve
+case_df['original_curve']=y1
 
 # for better plot, we fill this test user missing dates
 def fill_miss_dates_with_nan(case_df):       
@@ -848,7 +851,7 @@ case_df_fill_nan = fill_miss_dates_with_nan(case_df)
 label_font_args = dict(fontsize=18, family='Times New Roman')
 axis_font_args = dict(fontsize=14, family='Times New Roman')
 plt.figure(figsize=(14,8))
-plt.plot(case_df_fill_nan.index, case_df_fill_nan.steps, 'b',label='Mobility')
+plt.plot(case_df_fill_nan.index, case_df_fill_nan.original_curve, 'b',label='Mobility')
 plt.plot(case_df_fill_nan.index, case_df_fill_nan.smooth_curve, 'r',label='LOWESS curve, fraction=0.15, iteration = 4')
 plt.xlabel('Date',**label_font_args);plt.ylabel('Mobility (steps)',**label_font_args)
 plt.yticks(**axis_font_args);plt.xticks(**axis_font_args)
@@ -973,7 +976,7 @@ smooth_df_selected = [each[1] for each in merged_df_selected.groupby(['PID'])]
 entity_lists=[]
 n=7;alpha=5
 for i in range(len(smooth_df_selected)):
-    example_user =smooth_df_selected[i]
+    example_user = smooth_df_selected[i]
     trend_dict_mob=from_pd_to_trend_entity(example_user,'mobility',n)
     trend_dict_tst=from_pd_to_trend_entity(example_user,'TST',n)
     trend_dict_sol=from_pd_to_trend_entity(example_user,'SOL',n)
@@ -990,19 +993,18 @@ for i in range(len(smooth_df_selected)):
 
     entity_list={}
     
-    entity_list.update(trend_dict_mob)
+    entity_list.update(state_dict_tib)
     # entity_list.update(state_dict_se)
     # entity_list.update(trend_dict_wa)
     # entity_list.update(trend_dict_sol) 
     # entity_list.update(state_dict_mob) 
-    entity_list.update(state_dict_se)
+    entity_list.update(trend_dict_mob)
     entity_lists.append(entity_list)
-    
+#print('Number of entities:', len(entity_lists))
 
-print('Number of entities:', len(entity_lists))
-
+# Output TIRPs to out.txt file
 import KarmaLego as KL
-epsilon = 1
+epsilon = 0
 max_distance = 30
 min_ver_supp = 0.5
 
@@ -1013,6 +1015,7 @@ end = time.time()
 print('time to run', round(end - start), 's')
 
 
+#----------------------------------
 # get number of occurrences of an episode
 occurrence = 0
 key='R_se'
@@ -1064,7 +1067,9 @@ def from_pd_to_state_entity(example_user,column_name,alpha):
         if char =='a':
             labelled_sax_list.append('L') # low
             continue
-        if char == unique_symbols[-1]:
+        # if the sax_list has only two symbols, we changed one to 'L', 
+        # then the other should be 'N' but not 'H'
+        if char == unique_symbols[-1] and len(unique_symbols)!=2:
             labelled_sax_list.append('H') # high
             continue
         else:
@@ -1096,25 +1101,43 @@ def from_pd_to_state_entity(example_user,column_name,alpha):
     keys_list=[each_state[0] for each_state in list(state_pd.groupby(['state']))]
     state_dict_one_ts = dict(zip(keys_list, values_list))
     
-    
-    # Remove other lables, keep normal label
-    del state_dict_one_ts['L']
-    del state_dict_one_ts['H']
+    # there are some users with no L/H/N symbols
+    if 'L' in keys_list:
+        # Remove other lables, keep normal label
+        del state_dict_one_ts['L']
+    if 'H' in keys_list:
+        # Remove other lables, keep normal label
+        del state_dict_one_ts['H']
 
-    # Adding the name to the segmented time series
-    if column_name=='mobility':
-        state_dict_one_ts['N_mob'] = state_dict_one_ts.pop('N')
-    if column_name=='TST':
-        state_dict_one_ts['N_tst'] = state_dict_one_ts.pop('N')
-    if column_name=='SOL':
-        state_dict_one_ts['N_sol'] = state_dict_one_ts.pop('N')
-    if column_name=='WASO':
-        state_dict_one_ts['N_wa'] = state_dict_one_ts.pop('N')
-    if column_name=='SE':
-        state_dict_one_ts['N_se'] = state_dict_one_ts.pop('N')
-    if column_name=='TIB':
-        state_dict_one_ts['N_tib'] = state_dict_one_ts.pop('N')
-        
+    if 'N' in keys_list:
+        # Adding the name to the segmented time series
+        if column_name=='mobility':
+            state_dict_one_ts['N_mob'] = state_dict_one_ts.pop('N')
+        if column_name=='TST':
+            state_dict_one_ts['N_tst'] = state_dict_one_ts.pop('N')
+        if column_name=='SOL':
+            state_dict_one_ts['N_sol'] = state_dict_one_ts.pop('N')
+        if column_name=='WASO':
+            state_dict_one_ts['N_wa'] = state_dict_one_ts.pop('N')
+        if column_name=='SE':
+            state_dict_one_ts['N_se'] = state_dict_one_ts.pop('N')
+        if column_name=='TIB':
+            state_dict_one_ts['N_tib'] = state_dict_one_ts.pop('N')
+    
+    if 'N' not in keys_list:
+        if column_name=='mobility':
+            return {"N_mob": (0,0)}
+        if column_name=='TST':
+            return {"N_tst": (0,0)}
+        if column_name=='SOL':
+            return {"N_sol": (0,0)}
+        if column_name=='WASO':
+            return {"N_wa": (0,0)}
+        if column_name=='SE':
+            return {"N_se": (0,0)}
+        if column_name=='TIB':
+            return {"N_tib": (0,0)}
+    
     return state_dict_one_ts
 
 # Apply the function to each of the parameters
@@ -1195,6 +1218,9 @@ print(len(the_indexes_for_aRule),'/',
 
 print('unique people in two rules',len(list(set(the_indexes_for_complementaryRule+the_indexes_for_aRule))) )
 print(len(list(set(the_indexes_for_complementaryRule+the_indexes_for_aRule)))/42)
+
+#----------------------------
+
 
 
 
