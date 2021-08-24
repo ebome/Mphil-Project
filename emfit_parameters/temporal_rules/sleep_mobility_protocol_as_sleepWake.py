@@ -10,6 +10,9 @@ import math
 import copy
 #import merge_sensors as ms # make sure they are in same dir, run ms first
 from datetime import datetime
+from scipy.signal import argrelextrema
+# from segmented time series, get the trend
+import time
 
 #############################################################################
 # Topological floor plan
@@ -709,10 +712,20 @@ for i in range(len(reformed_sleep_list)):
                 how = 'inner')[['PID','local_timestamp','steps','TST(hour)','WASO(min)','SOL(min)',
                                 'SE','duraion_in_bed']]
     merged_df.columns = ['PID','date','steps','TST','WASO','SOL','SE','TIB']    
-
+    # ensure all the dates are in same format
+    same_format_dates = pd.to_datetime(merged_df['date'], format='%Y-%m-%d')   
+    merged_df['date']=same_format_dates
     if len(merged_df)>10:                         
         final_df.append(merged_df)
         
+'''
+# to excel
+final_big_df=pd.DataFrame({})    
+for each in final_df:
+    final_big_df= pd.concat([final_big_df,each])
+final_big_df.to_excel(r'D:\Sensor_Data\temporal_rules\final_df.xlsx')
+'''
+
 
 #############################################################################
 # CODE age and gender into each user
@@ -805,15 +818,12 @@ demogrp_info_44_ppl = user_gender[user_gender['record_id'].isin(user_44_ppl_list
 
 demogrp_info_44_ppl[demogrp_info_44_ppl['gender']==1]['age'].describe()
 
-
-    
-
 '''
 # to excel
 final_big_df=pd.DataFrame({})    
 for each in smooth_final_df:
     final_big_df= pd.concat([final_big_df,each])
-final_big_df.to_excel(r'F:\Sensor_Data_Processing\temporal_rules\smoothed_final_df.xlsx')
+final_big_df.to_excel(r'D:\Sensor_Data\temporal_rules\smoothed_final_df.xlsx')
 '''
 # final_big_df = pd.read_excel(r'F:\Sensor_Data_Processing\temporal_rules\smoothed_final_df.xlsx')
 # smooth_final_df = [each[1] for each in final_big_df.groupby(['PID'])]
@@ -823,24 +833,28 @@ final_big_df.to_excel(r'F:\Sensor_Data_Processing\temporal_rules\smoothed_final_
 # Visulization
 #====================================
 # example of LOWESS smooth curve
-case_df = reformed_sensor_list[30]
+case_df = final_df[19]
 
-
-y1=np.asarray(reformed_sleep_list[30]['TST(hour)'].tolist() )
+y1=np.asarray(case_df['steps'].tolist() )
 # to run LOWESS, ensure x axis is in correct format
-x = pd.to_datetime(case_df['date'], format='%d/%m/%Y  %H:%M')   
+x = pd.to_datetime(case_df['date'], format='%Y-%m-%d')   
 smooth_curve = np.asarray( lowess(y1, x, frac=0.15, it=4)[:,1] )
 case_df['smooth_curve']=smooth_curve
 case_df['original_curve']=y1
 
+x_labels_all = [date.strftime('%Y-%m-%d') for date in case_df['date'].index]
+x_labels = x_labels_all[0:len(x_labels_all):20]
+xInput = list(range(0,len(x_labels_all),20))
+
+
 # for better plot, we fill this test user missing dates
 def fill_miss_dates_with_nan(case_df):       
     start_time = dt.datetime.strptime(str(case_df['date'].tolist()[0]), '%Y-%m-%d %H:%M:%S')
-    end_time = dt.datetime.strptime(str(case_df['date'].tolist()[-1]), '%Y-%m-%d  %H:%M:%S')
+    end_time = dt.datetime.strptime(str(case_df['date'].tolist()[-1]), '%Y-%m-%d %H:%M:%S')
     period_len = (end_time - start_time).days+1
     datelist = pd.date_range(start_time, periods = period_len).tolist()
     # cast dataframe 'Day' to datetime
-    case_df['date'] = [dt.datetime.strptime(str(each), '%Y-%m-%d  %H:%M:%S') for each in case_df['date'].tolist()]
+    case_df['date'] = [dt.datetime.strptime(str(each), '%Y-%m-%d %H:%M:%S') for each in case_df['date'].tolist()]
     case_df.index = pd.DatetimeIndex(case_df['date'])
     case_df = case_df.reindex(datelist, fill_value=float('nan'))
     return case_df
@@ -848,23 +862,104 @@ def fill_miss_dates_with_nan(case_df):
 case_df_fill_nan = fill_miss_dates_with_nan(case_df)
 
 # now plot the missing values
-label_font_args = dict(fontsize=18, family='Times New Roman')
+label_font_args = dict(fontsize=30, family='Times New Roman')
 axis_font_args = dict(fontsize=14, family='Times New Roman')
-plt.figure(figsize=(14,8))
-plt.plot(case_df_fill_nan.index, case_df_fill_nan.original_curve, 'b',label='Mobility')
-plt.plot(case_df_fill_nan.index, case_df_fill_nan.smooth_curve, 'r',label='LOWESS curve, fraction=0.15, iteration = 4')
-plt.xlabel('Date',**label_font_args);plt.ylabel('Mobility (steps)',**label_font_args)
-plt.yticks(**axis_font_args);plt.xticks(**axis_font_args)
-plt.legend(loc='upper right',prop={"family":"Times New Roman",'size':20})
-plt.show()
+plt.figure(figsize=(24,10))
+plt.plot(case_df.index, case_df.original_curve, 'b',label='Mobility')
+plt.plot(case_df.index, case_df.smooth_curve, 'r',label='LOWESS curve, fraction=0.15, iteration = 4')
+plt.xlabel('Date',**label_font_args);plt.ylabel('Mobility',**label_font_args)
+plt.yticks(**label_font_args);
+plt.xticks(rotation='vertical',**label_font_args)
+plt.legend(loc='upper right',prop={"family":"Times New Roman",'size':26})
+
+
+
+#===========================
+# examples of a user's time series 
+case_df = final_df[19]
+case_df_fill_nan = fill_miss_dates_with_nan(case_df)
+
+
+case_df['steps'].describe()
+dates = list(range(len(case_df_fill_nan['steps'])))
+x_labels_all = [date.strftime('%Y-%m-%d') for date in case_df_fill_nan['date'].index]
+x_labels = x_labels_all[0:len(dates):20]
+xInput = list(range(0,len(dates),20))
+label_font_args = dict(fontsize=30, family='Times New Roman')
+axis_font_args = dict(fontsize=8, family='Times New Roman')
+
+
+plt.figure(figsize=(24,10))
+#plt.subplot(3,2,1)
+plt.plot(case_df_fill_nan['steps'].tolist())
+plt.ylabel("Mobility",**label_font_args);
+plt.xlabel('Date',**label_font_args)
+plt.yticks(**label_font_args)
+plt.xticks(xInput,x_labels, rotation='vertical',**label_font_args)
+
+plt.subplot(3,2,2)
+plt.plot(case_df_fill_nan['TST'].tolist())
+plt.ylabel("TST(hour)",**label_font_args);plt.yticks(**label_font_args)
+plt.xticks(xInput,x_labels, rotation='vertical',**axis_font_args)
+
+plt.subplot(3,2,3)
+plt.plot(case_df_fill_nan['SOL'].tolist())
+plt.ylabel("SOL(minute)",**label_font_args);plt.yticks(**label_font_args)
+plt.xticks(xInput,x_labels, rotation='vertical',**axis_font_args)
+
+plt.subplot(3,2,4)
+plt.plot(case_df_fill_nan['SE'].tolist())
+plt.ylabel("SE",**label_font_args);plt.yticks(**label_font_args)
+plt.xticks(xInput,x_labels, rotation='vertical',**axis_font_args)
+
+plt.subplot(3,2,5)
+plt.plot(case_df_fill_nan['WASO'].tolist())
+plt.ylabel("WASO(minute)",**label_font_args);plt.yticks(**label_font_args)
+plt.xticks(xInput,x_labels, rotation='vertical',**axis_font_args)
+
+plt.subplot(3,2,6)
+plt.plot(case_df_fill_nan['TIB'].tolist())
+plt.ylabel("TIB(hour)",**label_font_args);plt.yticks(**label_font_args)
+plt.xticks(xInput,x_labels, rotation='vertical',**axis_font_args)
+
+
 
 #############################################################################
 # Change point detection: local max and min on smooth_final_df
 #############################################################################
-from scipy.signal import argrelextrema
-# from segmented time series, get the trend
-import time
+# Visualization of local min and max
+example_user = smooth_final_df[19]
+n=7
+df = pd.DataFrame(example_user, columns=['mobility','date'])
+df.reset_index(drop=True, inplace=True)
+df['min'] = df.iloc[argrelextrema(df['mobility'].values, np.less_equal,
+                    order=n)[0]]['mobility']
+df['max'] = df.iloc[argrelextrema(df['mobility'].values, np.greater_equal,
+                    order=n)[0]]['mobility']
+index_min = df.loc[df['min']>0].index.tolist()
+index_max = df.loc[df['max']>0].index.tolist()
+index_seg = sorted(list(set(index_min + index_max+[0])))
 
+# remove the NaN in min and max columns to get the dates contain min and max
+df_extrema_dates = df.iloc[index_seg]
+x_labels = [date.strftime('%Y-%m-%d') for date in df_extrema_dates['date'].tolist()]
+
+label_font_args = dict(fontsize=30, family='Times New Roman')
+axis_font_args = dict(fontsize=14, family='Times New Roman')
+plt.figure(figsize=(24,10))
+plt.plot(df['mobility'],color='r',label='Smoothed Mobility')
+plt.scatter(df.index,df['min'],color='b',label='local minima')
+plt.scatter(df.index,df['max'],color='g',label='local maxima')
+plt.xlabel('Date',**label_font_args);plt.ylabel('Mobility',**label_font_args)
+plt.yticks(**axis_font_args)
+plt.xticks(index_seg,x_labels, rotation='vertical',**axis_font_args)
+plt.legend(loc='upper right',prop={"family":"Times New Roman",'size':20})
+for xc in index_seg:
+    plt.axvline(x=xc,color='k', linestyle='--')
+
+
+#===========================
+# get trends dictionary    
 
 import trendet
 def from_pd_to_trend_entity(example_user,column_name,n):
@@ -984,22 +1079,23 @@ for i in range(len(smooth_df_selected)):
     trend_dict_se=from_pd_to_trend_entity(example_user,'SE',n)
     trend_dict_tib=from_pd_to_trend_entity(example_user,'TIB',n)
     
-    state_dict_mob=from_pd_to_state_entity(example_user,'mobility',alpha)
-    state_dict_tst=from_pd_to_state_entity(example_user,'TST',alpha)
-    state_dict_sol=from_pd_to_state_entity(example_user,'SOL',alpha)
-    state_dict_wa=from_pd_to_state_entity(example_user,'WASO',alpha)
-    state_dict_se=from_pd_to_state_entity(example_user,'SE',alpha)
-    state_dict_tib=from_pd_to_state_entity(example_user,'TIB',alpha)
+#    state_dict_mob=from_pd_to_state_entity(example_user,'mobility',alpha)
+#    state_dict_tst=from_pd_to_state_entity(example_user,'TST',alpha)
+#    state_dict_sol=from_pd_to_state_entity(example_user,'SOL',alpha)
+#    state_dict_wa=from_pd_to_state_entity(example_user,'WASO',alpha)
+#    state_dict_se=from_pd_to_state_entity(example_user,'SE',alpha)
+#    state_dict_tib=from_pd_to_state_entity(example_user,'TIB',alpha)
 
     entity_list={}
     
-    entity_list.update(state_dict_tib)
+    entity_list.update(trend_dict_tst)
     # entity_list.update(state_dict_se)
     # entity_list.update(trend_dict_wa)
     # entity_list.update(trend_dict_sol) 
     # entity_list.update(state_dict_mob) 
     entity_list.update(trend_dict_mob)
     entity_lists.append(entity_list)
+
 #print('Number of entities:', len(entity_lists))
 
 # Output TIRPs to out.txt file
@@ -1018,7 +1114,7 @@ print('time to run', round(end - start), 's')
 #----------------------------------
 # get number of occurrences of an episode
 occurrence = 0
-key='R_se'
+key='S_tst'
 for each_user_entities in entity_lists:
     # each_user_entities is a dictionary
     if key in each_user_entities.keys():
@@ -1027,12 +1123,22 @@ for each_user_entities in entity_lists:
 print('occurrence=',occurrence)
 
 
+len(each_user_entities['S_tst'])
+
 # count occurences and nn-repteated occurence
-a=[24, 25, 17, 30, 23, 1, 35, 31, 5, 14, 0, 21, 1, 14, 8, 27, 29, 33, 8, 7, 23, 32, 22, 35, 5, 22, 18, 13, 7, 23, 9, 23, 15, 12, 7, 21, 3, 15, 4, 17, 26, 0, 13, 6, 25, 18, 14, 11, 11, 13, 10, 27, 16, 33, 2, 32, 8, 25, 21, 18, 30, 34, 12, 9, 9, 13, 28, 34, 27, 3, 0, 20, 16, 15, 29, 7, 24, 0, 17, 23, 35, 31, 9, 5, 22, 13, 27, 33, 20, 17, 33, 28, 0, 15, 24]
-the_indexes_for_complementaryRule = a
+
+A=[7, 26, 31, 28, 7, 26, 17, 5, 8, 21, 18, 6, 34, 1, 28, 31, 28, 0, 15, 13, 14, 18, 18, 12, 23, 9, 14, 21, 15, 23, 13, 16, 34, 26, 25, 17, 3, 7, 23, 27, 29, 0, 26, 1, 4, 25, 11, 7, 25, 6, 3, 24, 5, 35, 2, 34, 27, 12, 33, 17, 23, 33, 19, 1, 22, 19, 26, 8, 33, 25, 33, 17, 0, 24, 30, 2, 6, 9, 25, 6, 2, 24, 24, 23, 33, 23, 30, 35, 7, 24, 13, 16, 5, 28, 28, 23, 25, 28, 22, 35, 15, 14, 2, 31, 12, 25, 17, 17, 7, 35, 34, 0]
+
+
+the_indexes_for_complementaryRule = A
 print(len(the_indexes_for_complementaryRule),'/',
       len(list(set(the_indexes_for_complementaryRule))), '=',
       len(the_indexes_for_complementaryRule)/len(list(set(the_indexes_for_complementaryRule))))
+
+
+
+
+
 
 the_indexes_for_aRule = [10, 14, 13, 0, 16, 15, 2]
 print(len(the_indexes_for_aRule),'/',
